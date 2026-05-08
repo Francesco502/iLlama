@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and publish"
+        required: true
+        default: "v1.0.0"
 
 permissions:
   contents: write
@@ -12,10 +18,14 @@ jobs:
   build-macos:
     name: Build macOS release artifact
     runs-on: macos-15
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -46,13 +56,16 @@ jobs:
 
       - name: Generate checksum
         run: |
-          shasum -a 256 src-tauri/target/release/bundle/dmg/iLlama_*_aarch64.dmg \
-            > src-tauri/target/release/bundle/dmg/SHA256SUMS
+          VERSION=$(node -p 'require("./package.json").version')
+          shasum -a 256 "src-tauri/target/release/bundle/dmg/iLlama_${VERSION}_aarch64.dmg" \
+            > "src-tauri/target/release/bundle/dmg/iLlama_${VERSION}_aarch64.dmg.sha256"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          body_path: docs/releases/v1.0.0.md
+          tag_name: ${{ env.RELEASE_TAG }}
+          body_path: docs/releases/${{ env.RELEASE_TAG }}.md
+          overwrite_files: true
           files: |
             src-tauri/target/release/bundle/dmg/iLlama_*_aarch64.dmg
-            src-tauri/target/release/bundle/dmg/SHA256SUMS
+            src-tauri/target/release/bundle/dmg/iLlama_*_aarch64.dmg.sha256
