@@ -1,0 +1,27 @@
+[package]
+name = "illama"
+version = "1.0.0"
+description = "Low-overhead iLlama desktop launcher"
+authors = ["iLlama contributors"]
+edition = "2021"
+
+[lib]
+name = "illama_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.33"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

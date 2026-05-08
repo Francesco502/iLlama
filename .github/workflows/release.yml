@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS release artifact
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify frontend
+        run: |
+          npm test
+          npm run build
+
+      - name: Verify Rust
+        working-directory: src-tauri
+        run: |
+          cargo test
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+
+      - name: Build unsigned macOS bundle
+        run: npm run tauri:build
+
+      - name: Generate checksum
+        run: |
+          shasum -a 256 src-tauri/target/release/bundle/dmg/iLlama_*_aarch64.dmg \
+            > src-tauri/target/release/bundle/dmg/SHA256SUMS
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: docs/releases/v1.0.0.md
+          files: |
+            src-tauri/target/release/bundle/dmg/iLlama_*_aarch64.dmg
+            src-tauri/target/release/bundle/dmg/SHA256SUMS
