@@ -15,13 +15,19 @@ type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
 
+export interface ChatStreamDelta {
+  contentDelta: string;
+  reasoningDelta: string;
+}
+
 interface StreamChatOptions {
   host: string;
   port: number;
   messages: ChatRequestMessage[];
   sampling: SamplingParameters;
   signal?: AbortSignal;
-  onToken: (token: string) => void;
+  onToken?: (token: string) => void;
+  onDelta?: (delta: ChatStreamDelta) => void;
 }
 
 export async function streamChatCompletion({
@@ -31,6 +37,7 @@ export async function streamChatCompletion({
   sampling,
   signal,
   onToken,
+  onDelta,
 }: StreamChatOptions): Promise<void> {
   const response = await fetch(`http://${host}:${port}/v1/chat/completions`, {
     method: "POST",
@@ -70,9 +77,10 @@ export async function streamChatCompletion({
         return;
       }
 
-      const token = parseDeltaToken(payload);
-      if (token) {
-        onToken(token);
+      const delta = parseDeltaEvent(payload);
+      if (delta.contentDelta || delta.reasoningDelta) {
+        onDelta?.(delta);
+        onToken?.(delta.contentDelta || delta.reasoningDelta);
       }
     }
   }
@@ -122,13 +130,21 @@ function buildMessageContent(message: ChatRequestMessage): string | ChatContentP
   return parts;
 }
 
-export function parseDeltaToken(payload: string): string {
+export function parseDeltaEvent(payload: string): ChatStreamDelta {
   try {
     const parsed = JSON.parse(payload) as {
       choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }>;
     };
-    return parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.delta?.reasoning_content ?? "";
+    return {
+      contentDelta: parsed.choices?.[0]?.delta?.content ?? "",
+      reasoningDelta: parsed.choices?.[0]?.delta?.reasoning_content ?? "",
+    };
   } catch {
-    return "";
+    return { contentDelta: "", reasoningDelta: "" };
   }
+}
+
+export function parseDeltaToken(payload: string): string {
+  const delta = parseDeltaEvent(payload);
+  return delta.contentDelta || delta.reasoningDelta;
 }

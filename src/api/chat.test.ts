@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildChatCompletionBody, parseDeltaToken } from "./chat";
+import { splitThinkTags } from "../lib/reasoning";
+import { buildChatCompletionBody, parseDeltaEvent, parseDeltaToken } from "./chat";
 
 describe("chat streaming parser", () => {
   it("reads normal content deltas", () => {
@@ -12,6 +13,25 @@ describe("chat streaming parser", () => {
     const token = parseDeltaToken('{"choices":[{"delta":{"reasoning_content":"思考"}}]}');
 
     expect(token).toBe("思考");
+  });
+
+  it("reads visible content deltas separately from reasoning deltas", () => {
+    expect(parseDeltaEvent('{"choices":[{"delta":{"content":"答案"}}]}')).toEqual({
+      contentDelta: "答案",
+      reasoningDelta: "",
+    });
+    expect(parseDeltaEvent('{"choices":[{"delta":{"reasoning_content":"推理"}}]}')).toEqual({
+      contentDelta: "",
+      reasoningDelta: "推理",
+    });
+  });
+
+  it("extracts completed think tags from visible content", () => {
+    expect(splitThinkTags("<think>先分析</think>最终答案")).toEqual({
+      reasoning: "先分析",
+      content: "最终答案",
+      open: false,
+    });
   });
 });
 
