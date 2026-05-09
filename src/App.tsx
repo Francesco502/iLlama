@@ -2,7 +2,7 @@ import { FileCog, Play, Cpu } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AppLayout } from "./components/AppLayout";
-import { ChatPanel } from "./components/ChatPanel";
+import { ChatWorkspace } from "./components/chat/ChatWorkspace";
 import { CommandPreview } from "./components/CommandPreview";
 import { ModelDirectoryPicker } from "./components/ModelDirectoryPicker";
 import { ModelList } from "./components/ModelList";
@@ -27,7 +27,8 @@ import {
   removeDirectoryModels,
 } from "./state/appState";
 import { useLlamaProcess } from "./hooks/useLlamaProcess";
-import { useChatSession } from "./hooks/useChatSession";
+import { useChatGeneration } from "./hooks/useChatGeneration";
+import { useChatWorkspace } from "./hooks/useChatWorkspace";
 import type {
   LogEntry,
   ModelDirectory,
@@ -117,15 +118,35 @@ export function App() {
   });
 
   const {
-    messages,
+    conversations,
+    activeConversation,
+    createConversation,
+    selectConversation,
+    saveConversation,
+    renameConversation,
+    deleteConversation,
+    branchFromMessage,
+  } = useChatWorkspace({
+    historyEnabled: chatHistory.enabled,
+    modelPath: selectedModel?.path ?? null,
+    modelName: selectedModel?.fileName ?? null,
+  });
+
+  const {
     streaming,
     streamTokensPerSecond,
-    handleSendMessage,
-    handleCancelGeneration,
-    handleClearChat,
-  } = useChatSession({
+    sendMessage,
+    cancelGeneration,
+    regenerateFromMessage,
+    editUserMessageAndResend,
+  } = useChatGeneration({
     port,
     sampling: profile.sampling,
+    contextSize: startupParameters.ctxSize,
+    modelPath: selectedModel?.path ?? null,
+    modelName: selectedModel?.fileName ?? null,
+    activeConversation,
+    saveConversation,
     appendSystemLog,
   });
 
@@ -544,13 +565,23 @@ export function App() {
           </div>
         }
         chatContent={
-          <ChatPanel
-            messages={messages}
-            disabled={runtimeStatus !== "healthy"}
+          <ChatWorkspace
+            runtimeStatus={runtimeStatus}
+            selectedModel={selectedModel}
+            conversations={conversations}
+            activeConversation={activeConversation}
             streaming={streaming}
-            onCancel={handleCancelGeneration}
-            onSend={handleSendMessage}
-            onClear={handleClearChat}
+            streamTokensPerSecond={streamTokensPerSecond}
+            onCreateConversation={createConversation}
+            onSelectConversation={selectConversation}
+            onSaveConversation={saveConversation}
+            onRenameConversation={renameConversation}
+            onDeleteConversation={deleteConversation}
+            onBranchFromMessage={branchFromMessage}
+            onSend={sendMessage}
+            onCancel={cancelGeneration}
+            onRegenerate={regenerateFromMessage}
+            onEditAndResend={editUserMessageAndResend}
           />
         }
         logs={logs}
