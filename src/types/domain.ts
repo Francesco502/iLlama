@@ -97,26 +97,8 @@ export interface RuntimeMetrics {
   kvCacheUsageRatio: number | null;
 }
 
-export interface ChatImageAttachment {
-  id: string;
-  name: string;
-  mimeType: string;
-  sizeBytes: number;
-  dataUrl: string;
-  /** Small preview for display in message history (avoids retaining full base64). */
-  thumbnailUrl?: string;
-}
-
-export interface PendingChatMessage {
-  text: string;
-  attachments: ChatImageAttachment[];
-}
-
-export interface ChatMessage {
-  id: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  attachments?: ChatImageAttachment[];
-  createdAt: string;
-  streaming?: boolean;
-}
+export type {
+  ChatAttachment as ChatImageAttachment,
+  ChatMessage,
+  PendingChatMessage,
+} from "./chat";
