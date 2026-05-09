@@ -15,11 +15,13 @@ import {
   saveSettings,
   scanModelDirectory,
   type AppSettings,
+  type ChatHistorySettings,
 } from "./api/tauri";
 import { buildCommandPreview, getProfileById, validateLaunchConfig } from "./lib/parameterSchema";
 import { demoModelDirectories, demoModels } from "./state/appStore";
 import {
   buildSettingsSnapshot,
+  defaultChatHistorySettings,
   mergeScannedModels,
   pickSelectedModelPath,
   removeDirectoryModels,
@@ -62,6 +64,9 @@ export function App() {
   const [startupParameters, setStartupParameters] = useState(getProfileById("balanced").parameters);
   const [activeTab, setActiveTab] = useState<"config" | "chat">("config");
   const [modelSort, setModelSort] = useState<"name" | "size" | "date">("name");
+  const [chatHistory, setChatHistory] = useState<ChatHistorySettings>(
+    defaultChatHistorySettings,
+  );
 
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasBootstrappedRef = useRef(!runningInTauri);
@@ -157,8 +162,9 @@ export function App() {
         selectedModelPath,
         port,
         startupParameters,
+        chatHistory,
       }),
-    [binaryPath, directories, port, profileId, selectedModelPath, startupParameters],
+    [binaryPath, chatHistory, directories, port, profileId, selectedModelPath, startupParameters],
   );
 
   const displayedRuntimeMetrics = useMemo<RuntimeMetrics>(
@@ -211,6 +217,7 @@ export function App() {
         if (cancelled) return;
         setBinaryPath(resolvedBinary ?? settings.llamaServerPath);
         setPort(settings.defaultPort || DEFAULT_PORT);
+        setChatHistory(settings.chatHistory ?? defaultChatHistorySettings);
         const loadedProfileId = (settings.defaultPresetId as ParameterProfile["id"]) || "balanced";
         setProfileId(loadedProfileId);
         setStartupParameters({

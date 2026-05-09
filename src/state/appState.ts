@@ -1,5 +1,12 @@
-import type { AppSettings } from "../api/tauri";
+import type { AppSettings, ChatHistorySettings } from "../api/tauri";
 import type { ModelDirectory, ModelEntry, ParameterProfile, StartupParameters } from "../types/domain";
+
+export const defaultChatHistorySettings: ChatHistorySettings = {
+  enabled: true,
+  imagePersistence: "thumbnail",
+  includeReasoningInExportDefault: false,
+  maxConversations: 200,
+};
 
 interface SettingsSnapshotInput {
   directories: ModelDirectory[];
@@ -8,6 +15,7 @@ interface SettingsSnapshotInput {
   selectedModelPath: string | null;
   port: number;
   startupParameters: StartupParameters;
+  chatHistory?: ChatHistorySettings;
 }
 
 export function mergeScannedModels(
@@ -39,9 +47,10 @@ export function buildSettingsSnapshot({
   selectedModelPath,
   port,
   startupParameters,
+  chatHistory = defaultChatHistorySettings,
 }: SettingsSnapshotInput): AppSettings {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     modelDirectories: directories
       .filter((directory) => directory.status === "ready")
       .map((directory) => directory.path),
@@ -51,7 +60,7 @@ export function buildSettingsSnapshot({
     autoPort: true,
     defaultPort: port,
     idleSleepSeconds: startupParameters.idleSleepSeconds,
-    saveChatHistory: false,
+    chatHistory,
   };
 }
 

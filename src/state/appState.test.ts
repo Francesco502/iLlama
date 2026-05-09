@@ -72,10 +72,17 @@ describe("app state helpers", () => {
     });
 
     expect(snapshot).toMatchObject({
+      schemaVersion: 2,
       modelDirectories: ["/models/a"],
       llamaServerPath: "/bin/llama-server",
       defaultPort: 9090,
       idleSleepSeconds: 30,
+      chatHistory: {
+        enabled: true,
+        imagePersistence: "thumbnail",
+        includeReasoningInExportDefault: false,
+        maxConversations: 200,
+      },
     });
   });
 });

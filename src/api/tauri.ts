@@ -8,6 +8,13 @@ import type {
   ValidationResult,
 } from "../types/domain";
 
+export interface ChatHistorySettings {
+  enabled: boolean;
+  imagePersistence: "none" | "thumbnail" | "full";
+  includeReasoningInExportDefault: boolean;
+  maxConversations: number;
+}
+
 export interface AppSettings {
   schemaVersion: number;
   modelDirectories: string[];
@@ -17,7 +24,8 @@ export interface AppSettings {
   autoPort: boolean;
   defaultPort: number;
   idleSleepSeconds: number;
-  saveChatHistory: boolean;
+  saveChatHistory?: boolean;
+  chatHistory: ChatHistorySettings;
 }
 
 export interface RuntimeSnapshot {
