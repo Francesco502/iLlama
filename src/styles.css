@@ -1134,7 +1134,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-body p { margin: 0; }
 .md-code-block {
   margin: 6px 0;
-  padding: 10px 12px;
+  padding: 28px 12px 10px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.06);
   font-family: "SF Mono", ui-monospace, Menlo, monospace;
@@ -1156,6 +1156,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   text-transform: uppercase;
   opacity: 0.5;
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+.md-copy-btn {
+  position: absolute;
+  top: 5px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted-strong);
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
+}
+.md-copy-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.85);
 }
 .md-inline-code {
   padding: 1px 5px;

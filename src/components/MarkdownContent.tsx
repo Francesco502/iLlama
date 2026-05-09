@@ -1,97 +1,110 @@
+import { Copy } from "lucide-react";
 import type { ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeSanitize from "rehype-sanitize";
+import remarkGfm from "remark-gfm";
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import python from "highlight.js/lib/languages/python";
+import rust from "highlight.js/lib/languages/rust";
+import typescript from "highlight.js/lib/languages/typescript";
 
-/**
- * Lightweight markdown-to-React renderer. Handles:
- * - Fenced code blocks (```)
- * - Inline code (`)
- * - Bold (**)
- * - Lists (- and 1.)
- * - Line breaks
- *
- * No external dependencies required.
- */
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("javascript", javascript);
+hljs.registerLanguage("js", javascript);
+hljs.registerLanguage("json", json);
+hljs.registerLanguage("python", python);
+hljs.registerLanguage("py", python);
+hljs.registerLanguage("rust", rust);
+hljs.registerLanguage("rs", rust);
+hljs.registerLanguage("typescript", typescript);
+hljs.registerLanguage("ts", typescript);
+
 export function MarkdownContent({ text }: { text: string }): ReactNode {
   if (!text) {
     return null;
   }
 
-  const blocks = splitCodeBlocks(text);
-
   return (
-    <>
-      {blocks.map((block, index) =>
-        block.type === "code" ? (
-          <pre key={index} className="md-code-block">
-            {block.lang && <span className="md-code-lang">{block.lang}</span>}
-            <code>{block.content}</code>
-          </pre>
-        ) : (
-          <span key={index}>{renderInline(block.content)}</span>
-        ),
-      )}
-    </>
+    <div className="markdown-content">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSanitize]}
+        components={markdownComponents}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
   );
 }
 
-interface Block {
-  type: "text" | "code";
-  content: string;
-  lang?: string;
-}
-
-function splitCodeBlocks(text: string): Block[] {
-  const blocks: Block[] = [];
-  const parts = text.split(/^```(\w*)\n?/gm);
-
-  let inCode = false;
-  let lang = "";
-
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    if (!inCode) {
-      // Check if this part is a language identifier (between ``` markers)
-      if (i > 0 && i % 2 === 1) {
-        lang = part;
-        inCode = true;
-        continue;
-      }
-      if (part) {
-        blocks.push({ type: "text", content: part });
-      }
-    } else {
-      // Inside code block — this is the content
-      const content = part.endsWith("```") ? part.slice(0, -3) : part;
-      blocks.push({ type: "code", content: content.replace(/\n$/, ""), lang: lang || undefined });
-      lang = "";
-      inCode = false;
+const markdownComponents: Components = {
+  a({ children, ...props }) {
+    return (
+      <a {...props} target="_blank" rel="noreferrer">
+        {children}
+      </a>
+    );
+  },
+  pre({ children }) {
+    return <>{children}</>;
+  },
+  code({ className, children, ...props }) {
+    const code = String(children).replace(/\n$/, "");
+    const language = /language-(\w+)/.exec(className ?? "")?.[1];
+    if (!language && !code.includes("\n")) {
+      return (
+        <code className="md-inline-code" {...props}>
+          {children}
+        </code>
+      );
     }
+
+    return <CodeBlock code={code} language={language} />;
+  },
+};
+
+function CodeBlock({ code, language }: { code: string; language?: string }) {
+  async function copyCode() {
+    await navigator.clipboard?.writeText(code);
   }
 
-  return blocks;
+  return (
+    <pre className="md-code-block">
+      {language && <span className="md-code-lang">{language}</span>}
+      <button className="md-copy-btn" type="button" aria-label="复制代码" onClick={copyCode}>
+        <Copy size={12} />
+      </button>
+      <code
+        dangerouslySetInnerHTML={{
+          __html: highlightCode(code, language),
+        }}
+      />
+    </pre>
+  );
 }
 
-function renderInline(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  // Split by inline code first
-  const codeParts = text.split(/(`[^`]+`)/g);
-
-  for (let i = 0; i < codeParts.length; i++) {
-    const part = codeParts[i];
-    if (part.startsWith("`") && part.endsWith("`")) {
-      nodes.push(<code key={i} className="md-inline-code">{part.slice(1, -1)}</code>);
-    } else {
-      // Handle bold and text
-      const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
-      for (let j = 0; j < boldParts.length; j++) {
-        const bp = boldParts[j];
-        if (bp.startsWith("**") && bp.endsWith("**")) {
-          nodes.push(<strong key={`${i}-${j}`}>{bp.slice(2, -2)}</strong>);
-        } else if (bp) {
-          nodes.push(bp);
-        }
-      }
-    }
+function highlightCode(code: string, language?: string): string {
+  if (!code) {
+    return "";
   }
 
-  return nodes;
+  try {
+    if (language && hljs.getLanguage(language)) {
+      return hljs.highlight(code, { language, ignoreIllegals: true }).value;
+    }
+    return hljs.highlightAuto(code).value;
+  } catch {
+    return escapeHtml(code);
+  }
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
