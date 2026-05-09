@@ -1,3 +1,4 @@
+pub mod chat_history;
 pub mod commands;
 pub mod gguf;
 pub mod health;
@@ -23,7 +24,13 @@ pub fn run() {
             commands::runtime_snapshot_command,
             commands::confirm_health_command,
             commands::check_health_command,
-            commands::find_available_port_command
+            commands::find_available_port_command,
+            commands::load_chat_history_index_command,
+            commands::load_chat_conversation_command,
+            commands::save_chat_conversation_command,
+            commands::delete_chat_conversation_command,
+            commands::export_chat_conversation_command,
+            commands::clear_chat_history_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
