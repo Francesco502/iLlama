@@ -1,9 +1,11 @@
+#[cfg(unix)]
 use illama_lib::{
     llama_process::{LlamaProcessState, RuntimeStatus},
     parameters::{
         FlashAttentionSetting, GpuLayerSetting, LaunchConfig, StartupParameters, ThreadSetting,
     },
 };
+#[cfg(unix)]
 use std::{fs, net::TcpListener, thread, time::Duration};
 
 #[cfg(unix)]
@@ -69,6 +71,7 @@ fn write_shell_script(path: std::path::PathBuf, body: &str) -> std::path::PathBu
     path
 }
 
+#[cfg(unix)]
 fn config(binary: &str, model: &str, port: u16) -> LaunchConfig {
     LaunchConfig {
         binary_path: Some(binary.to_string()),
