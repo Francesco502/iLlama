@@ -2,7 +2,7 @@ use illama_lib::settings::{
     default_settings, detect_llama_server_in_path, load_settings_from, resolve_llama_server_path,
     save_settings_to,
 };
-use std::fs;
+use std::{env, fs, path::Path};
 
 #[test]
 fn creates_default_settings_when_file_is_missing() {
@@ -69,10 +69,10 @@ fn round_trips_settings_json() {
 #[test]
 fn detects_llama_server_from_path_env() {
     let dir = tempfile::tempdir().unwrap();
-    let binary = dir.path().join("llama-server");
+    let binary = dir.path().join(llama_server_binary_name());
     fs::write(&binary, "").unwrap();
 
-    let detected = detect_llama_server_in_path(&dir.path().to_string_lossy()).unwrap();
+    let detected = detect_llama_server_in_path(&path_env_for(dir.path())).unwrap();
 
     assert_eq!(detected, binary);
 }
@@ -81,17 +81,15 @@ fn detects_llama_server_from_path_env() {
 fn resolves_packaged_sidecar_before_path_fallback() {
     let resource_dir = tempfile::tempdir().unwrap();
     let path_dir = tempfile::tempdir().unwrap();
-    let sidecar = resource_dir
-        .path()
-        .join("llama-server-aarch64-apple-darwin");
-    let path_binary = path_dir.path().join("llama-server");
+    let sidecar = resource_dir.path().join(llama_server_sidecar_name());
+    let path_binary = path_dir.path().join(llama_server_binary_name());
     fs::write(&sidecar, "").unwrap();
     fs::write(&path_binary, "").unwrap();
 
     let resolved = resolve_llama_server_path(
         None,
         &[resource_dir.path().to_path_buf()],
-        &path_dir.path().to_string_lossy(),
+        &path_env_for(path_dir.path()),
     )
     .unwrap();
 
@@ -102,9 +100,7 @@ fn resolves_packaged_sidecar_before_path_fallback() {
 fn explicit_existing_binary_path_wins_over_sidecar() {
     let resource_dir = tempfile::tempdir().unwrap();
     let explicit_dir = tempfile::tempdir().unwrap();
-    let sidecar = resource_dir
-        .path()
-        .join("llama-server-aarch64-apple-darwin");
+    let sidecar = resource_dir.path().join(llama_server_sidecar_name());
     let explicit = explicit_dir.path().join("custom-server");
     fs::write(&sidecar, "").unwrap();
     fs::write(&explicit, "").unwrap();
@@ -117,4 +113,27 @@ fn explicit_existing_binary_path_wins_over_sidecar() {
     .unwrap();
 
     assert_eq!(resolved, explicit);
+}
+
+fn llama_server_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "llama-server.exe"
+    } else {
+        "llama-server"
+    }
+}
+
+fn llama_server_sidecar_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "llama-server-x86_64-pc-windows-msvc.exe"
+    } else {
+        "llama-server-aarch64-apple-darwin"
+    }
+}
+
+fn path_env_for(dir: &Path) -> String {
+    env::join_paths([dir])
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
 }
