@@ -30,8 +30,8 @@ The future bundled-sidecar path is:
 
 ## Signing And Notarization
 
-The release DMG must be built with a Developer ID Application certificate and
-submitted to Apple notarization before public distribution.
+The trusted public release DMG must be built with a Developer ID Application
+certificate and submitted to Apple notarization before distribution.
 
 Expected local prerequisites:
 
@@ -58,3 +58,17 @@ npm run release:macos
 
 If `APPLE_SIGNING_IDENTITY` is omitted, the script uses the first installed
 `Developer ID Application` identity it can find.
+
+## Unsigned Self-Download Builds
+
+When a Developer ID certificate or notary profile is unavailable, maintainers can
+produce an explicit unsigned hotfix artifact for direct user download:
+
+```bash
+ILLLAMA_UNSIGNED_RELEASE=1 npm run release:macos
+```
+
+This mode still runs the frontend and Rust verification steps, builds the `.app`
+and `.dmg`, and verifies the app bundle code signature that Tauri produces. It
+skips Apple notarization and staple validation, so the DMG will not have a
+stapled notarization ticket and macOS Gatekeeper may warn users on first launch.

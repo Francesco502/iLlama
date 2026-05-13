@@ -116,6 +116,7 @@ export function App() {
     deleteMessagePair,
     clearHistory,
     branchFromMessage,
+    loading: chatHistoryLoading,
   } = useChatWorkspace({
     historyEnabled: chatHistory.enabled,
     imagePersistence: chatHistory.imagePersistence,
@@ -543,6 +544,7 @@ export function App() {
             samplingMaxTokens={sampling.maxTokens}
             conversations={conversations}
             activeConversation={activeConversation}
+            historyLoading={chatHistoryLoading}
             searchHaystacks={searchHaystacks}
             chatHistory={chatHistory}
             streaming={streaming}

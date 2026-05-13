@@ -1,6 +1,13 @@
 # Release Checklist
 
-Current release target: `v2.1.1`.
+Current release target: `v2.1.2`.
+
+## v2.1.2 Hotfix
+
+- [x] Chat composer remains clickable after model launch
+- [x] Composer grid reserves stable columns for both attachment buttons and the text input
+- [x] Empty conversations show a concise first-message prompt
+- [x] App metadata versions aligned to `2.1.2` in npm, Tauri, and Rust crate metadata
 
 ## v2.1.1 Maintenance & quality
 
@@ -84,6 +91,7 @@ Current release target: `v2.1.1`.
 - [x] `cd src-tauri && cargo clippy --all-targets -- -D warnings`
 - [x] Confirm `src-tauri/binaries/` contains no release sidecar except `.gitkeep`
 - [ ] `APPLE_SIGNING_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" APPLE_NOTARY_PROFILE=illama-notary npm run release:macos`
+- [x] `ILLLAMA_UNSIGNED_RELEASE=1 npm run release:macos` for the unsigned v2.1.2 self-download hotfix artifact
 - [x] Confirm `iLlama.app/Contents/MacOS/illama`
 - [ ] Confirm the DMG has a stapled notarization ticket
 - [x] Open generated `.app`
@@ -97,7 +105,7 @@ Current release target: `v2.1.1`.
 - [ ] Stop model and confirm process exits
 - [ ] Check app remains responsive during streaming output
 
-Signing/notarization status on 2026-05-13: `npm run release:macos` is blocked because the keychain contains no Developer ID Application identity (`security find-identity -v -p codesigning` reports `0 valid identities found`) and no usable notary profile is configured. Unsigned local `.app` and `.dmg` artifacts build successfully with `npm run tauri:build`.
+Signing/notarization status on 2026-05-13: trusted notarized release mode is blocked because the keychain contains no Developer ID Application identity (`security find-identity -v -p codesigning` reports `0 valid identities found`) and no usable notary profile is configured. The explicit unsigned self-download mode is `ILLLAMA_UNSIGNED_RELEASE=1 npm run release:macos`; it does not produce a stapled notarization ticket.
 
 ## Windows
 

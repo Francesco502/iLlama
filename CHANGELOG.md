@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.1.2 - 2026-05-13
+
+### Fixed
+
+- Fix the chat composer becoming effectively unclickable after launch by automatically preparing a usable conversation when the runtime is ready.
+- Correct the composer grid so the attachment buttons and message input keep stable columns.
+- Improve empty-chat and disabled-state copy for clearer first-message behavior.
+- Add an explicit unsigned macOS release mode for self-download hotfix builds when Developer ID notarization is not available.
+
 ## v2.1.1 - 2026-05-13
 
 ### Fixed

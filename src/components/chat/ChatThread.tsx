@@ -46,6 +46,17 @@ export function ChatThread({
     );
   }
 
+  if (conversation.messages.length === 0) {
+    return (
+      <div className="chat-thread empty" ref={listRef} aria-label="消息列表">
+        <div className="chat-empty-state">
+          <h3>输入第一条消息开始对话</h3>
+          <p>本地模型准备好后，你的提示、附件和历史都会留在这台设备上。</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="chat-thread" ref={listRef} aria-label="消息列表" aria-live={streaming ? "polite" : "off"}>
       {conversation.messages.map((message) => (

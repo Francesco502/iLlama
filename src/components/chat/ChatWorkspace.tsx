@@ -24,6 +24,7 @@ export interface ChatWorkspaceProps {
   samplingMaxTokens: number;
   conversations: ChatConversationSummary[];
   activeConversation: ChatConversation | null;
+  historyLoading?: boolean;
   searchHaystacks?: Record<string, string>;
   chatHistory: ChatHistorySettings;
   streaming: boolean;
@@ -63,6 +64,7 @@ export function ChatWorkspace({
   samplingMaxTokens,
   conversations,
   activeConversation,
+  historyLoading = false,
   searchHaystacks,
   chatHistory,
   streaming,
@@ -95,7 +97,16 @@ export function ChatWorkspace({
   const [dateRangePreset, setDateRangePreset] = useState<ConversationDateRangePreset>("all");
   const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const disabled = runtimeStatus !== "healthy" || streaming || !activeConversation;
+  const autoPrepareConversationRef = useRef(false);
+  const disabledReason =
+    runtimeStatus !== "healthy"
+      ? "runtime"
+      : streaming
+        ? "streaming"
+        : !activeConversation
+          ? "conversation"
+          : undefined;
+  const disabled = Boolean(disabledReason);
   const activeId = activeConversation?.id ?? null;
   const composerDraft = activeId ? (composerDrafts[activeId] ?? "") : "";
 
@@ -174,6 +185,39 @@ export function ChatWorkspace({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onCancel, onCreateConversation, streaming]);
+
+  useEffect(() => {
+    if (
+      runtimeStatus !== "healthy" ||
+      activeConversation ||
+      historyLoading ||
+      autoPrepareConversationRef.current
+    ) {
+      return;
+    }
+
+    autoPrepareConversationRef.current = true;
+    const firstConversation = conversations.find((conversation) => !conversation.archived);
+
+    void (async () => {
+      try {
+        if (firstConversation) {
+          await onSelectConversation(firstConversation.id);
+        } else {
+          await onCreateConversation();
+        }
+      } finally {
+        autoPrepareConversationRef.current = false;
+      }
+    })();
+  }, [
+    activeConversation,
+    conversations,
+    historyLoading,
+    onCreateConversation,
+    onSelectConversation,
+    runtimeStatus,
+  ]);
 
   const kvRatio = runtimeMetrics.kvCacheUsageRatio;
   const kvWarn =
@@ -309,6 +353,7 @@ export function ChatWorkspace({
         <ErrorBoundary variant="inline" title="输入区渲染出错">
           <ChatComposer
             disabled={disabled}
+            disabledReason={disabledReason}
             streaming={streaming}
             imagePersistence={chatHistory.imagePersistence === "none" ? "memory" : chatHistory.imagePersistence}
             draftText={composerDraft}

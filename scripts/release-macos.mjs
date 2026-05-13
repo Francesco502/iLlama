@@ -12,6 +12,7 @@ const appPath = join(cwd, "src-tauri/target/release/bundle/macos/iLlama.app");
 const dmgPath = join(cwd, `src-tauri/target/release/bundle/dmg/iLlama_${version}_aarch64.dmg`);
 const binariesDir = join(cwd, "src-tauri/binaries");
 const notaryProfile = process.env.APPLE_NOTARY_PROFILE ?? "illama-notary";
+const unsignedRelease = process.env.ILLLAMA_UNSIGNED_RELEASE === "1";
 
 function run(command, args, options = {}) {
   console.log(`\n$ ${command} ${args.join(" ")}`);
@@ -104,8 +105,10 @@ function ensureNotaryProfile() {
 }
 
 ensureExternalLlamaServerStrategy();
-const signingIdentity = resolveDeveloperIdIdentity();
-ensureNotaryProfile();
+const signingIdentity = unsignedRelease ? null : resolveDeveloperIdIdentity();
+if (!unsignedRelease) {
+  ensureNotaryProfile();
+}
 
 run("npm", ["test"]);
 run("npm", ["run", "build"]);
@@ -113,31 +116,75 @@ run("cargo", ["test"], { cwd: join(cwd, "src-tauri") });
 run("cargo", ["fmt", "--check"], { cwd: join(cwd, "src-tauri") });
 run("cargo", ["clippy", "--all-targets", "--", "-D", "warnings"], { cwd: join(cwd, "src-tauri") });
 
-const signingConfigPath = join(tmpdir(), "illama-tauri-signing-config.json");
-writeFileSync(
-  signingConfigPath,
-  JSON.stringify(
-    {
-      bundle: {
-        macOS: {
-          signingIdentity,
-          hardenedRuntime: true,
+if (unsignedRelease) {
+  console.warn(
+    [
+      "",
+      "Building an explicit unsigned macOS release because ILLLAMA_UNSIGNED_RELEASE=1 is set.",
+      "The resulting DMG is for direct user download only and will not have a stapled notarization ticket.",
+      "",
+    ].join("\n"),
+  );
+  const adHocSigningConfigPath = join(tmpdir(), "illama-tauri-ad-hoc-signing-config.json");
+  writeFileSync(
+    adHocSigningConfigPath,
+    JSON.stringify(
+      {
+        bundle: {
+          macOS: {
+            signingIdentity: "-",
+            hardenedRuntime: false,
+          },
         },
       },
-    },
-    null,
-    2,
-  ),
-);
+      null,
+      2,
+    ),
+  );
 
-try {
-  run("npx", ["tauri", "build", "--ci", "--config", signingConfigPath]);
-} finally {
-  rmSync(signingConfigPath, { force: true });
+  try {
+    run("npx", ["tauri", "build", "--ci", "--config", adHocSigningConfigPath]);
+  } finally {
+    rmSync(adHocSigningConfigPath, { force: true });
+  }
+} else {
+  const signingConfigPath = join(tmpdir(), "illama-tauri-signing-config.json");
+  writeFileSync(
+    signingConfigPath,
+    JSON.stringify(
+      {
+        bundle: {
+          macOS: {
+            signingIdentity,
+            hardenedRuntime: true,
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  try {
+    run("npx", ["tauri", "build", "--ci", "--config", signingConfigPath]);
+  } finally {
+    rmSync(signingConfigPath, { force: true });
+  }
 }
 
 run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
-run("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]);
-run("xcrun", ["notarytool", "submit", dmgPath, "--keychain-profile", notaryProfile, "--wait"]);
-run("xcrun", ["stapler", "staple", dmgPath]);
-run("xcrun", ["stapler", "validate", dmgPath]);
+if (unsignedRelease) {
+  const assessment = capture("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]);
+  if (assessment.ok) {
+    console.warn("Gatekeeper assessment unexpectedly passed for the unsigned release.");
+  } else {
+    console.warn("Gatekeeper assessment failed as expected for the unsigned/unnotarized release:");
+    console.warn(assessment.output.trim());
+  }
+  console.warn(`Unsigned DMG built at: ${dmgPath}`);
+} else {
+  run("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]);
+  run("xcrun", ["notarytool", "submit", dmgPath, "--keychain-profile", notaryProfile, "--wait"]);
+  run("xcrun", ["stapler", "staple", dmgPath]);
+  run("xcrun", ["stapler", "validate", dmgPath]);
+}

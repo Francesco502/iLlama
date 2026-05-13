@@ -1,14 +1,17 @@
 import { ClipboardPaste, FileText, ImagePlus, SendHorizontal, Square, X } from "lucide-react";
-import { ChangeEvent, DragEvent, KeyboardEvent, ClipboardEvent, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, KeyboardEvent, ClipboardEvent, useEffect, useRef, useState } from "react";
 import type { ChatAttachment, ChatAttachmentPersistence, PendingChatMessage } from "../../types/chat";
 
 const MAX_ATTACHMENTS = 4;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_TEXT_BYTES = 512 * 1024;
 const THUMBNAIL_SIZE = 128;
+const COMPOSER_MIN_HEIGHT = 44;
+const COMPOSER_MAX_HEIGHT = 180;
 
 interface ChatComposerProps {
   disabled: boolean;
+  disabledReason?: "runtime" | "conversation" | "streaming";
   streaming: boolean;
   imagePersistence: ChatAttachmentPersistence;
   draftText?: string;
@@ -19,6 +22,7 @@ interface ChatComposerProps {
 
 export function ChatComposer({
   disabled,
+  disabledReason,
   streaming,
   imagePersistence,
   draftText,
@@ -30,8 +34,17 @@ export function ChatComposer({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const wasDisabledRef = useRef(disabled);
   const draft = draftText ?? uncontrolledDraft;
   const canSend = !disabled && !streaming && (draft.trim().length > 0 || attachments.length > 0);
+  const placeholder = disabled
+    ? disabledReason === "conversation"
+      ? "正在准备新对话…"
+      : disabledReason === "streaming"
+        ? "正在生成，可停止后继续输入"
+        : "启动模型后即可发送"
+    : "输入消息，与本地模型对话…（可拖入图片或文本文件）";
 
   function updateDraft(next: string) {
     if (draftText === undefined) {
@@ -39,6 +52,25 @@ export function ChatComposer({
     }
     onDraftTextChange?.(next);
   }
+
+  useEffect(() => {
+    const wasDisabled = wasDisabledRef.current;
+    wasDisabledRef.current = disabled;
+    if (wasDisabled && !disabled && !streaming) {
+      textareaRef.current?.focus();
+    }
+  }, [disabled, streaming]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    const nextHeight = Math.max(
+      COMPOSER_MIN_HEIGHT,
+      Math.min(textarea.scrollHeight, COMPOSER_MAX_HEIGHT),
+    );
+    textarea.style.height = `${nextHeight}px`;
+  }, [draft]);
 
   function submit() {
     const text = draft.trim();
@@ -168,7 +200,10 @@ export function ChatComposer({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || !event.altKey) {
       event.preventDefault();
       submit();
     }
@@ -265,13 +300,10 @@ export function ChatComposer({
             onChange={handleFileSelection}
           />
           <textarea
+            ref={textareaRef}
             aria-label="输入消息"
             disabled={disabled}
-            placeholder={
-              disabled
-                ? "启动模型后即可发送"
-                : "输入消息，与本地模型对话…（可拖入图片或 .txt/.md/.json 等文本文件）"
-            }
+            placeholder={placeholder}
             rows={1}
             value={draft}
             onChange={(event) => updateDraft(event.target.value)}

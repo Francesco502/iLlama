@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatHistorySettings } from "../../api/tauri";
@@ -227,6 +227,33 @@ describe("ChatWorkspace", () => {
     expect(screen.getByLabelText("输入消息")).toBeDisabled();
   });
 
+  it("prepares a new conversation when chat becomes ready without an active thread", async () => {
+    const onCreateConversation = vi.fn(async () => activeConversation);
+    renderWorkspace({
+      conversations: [],
+      activeConversation: null,
+      runtimeStatus: "healthy",
+      onCreateConversation,
+    });
+
+    await waitFor(() => expect(onCreateConversation).toHaveBeenCalledTimes(1));
+  });
+
+  it("creates a fresh thread instead of auto-opening archived history", async () => {
+    const onCreateConversation = vi.fn(async () => activeConversation);
+    const onSelectConversation = vi.fn();
+    renderWorkspace({
+      conversations: summaries.map((conversation) => ({ ...conversation, archived: true })),
+      activeConversation: null,
+      runtimeStatus: "healthy",
+      onCreateConversation,
+      onSelectConversation,
+    });
+
+    await waitFor(() => expect(onCreateConversation).toHaveBeenCalledTimes(1));
+    expect(onSelectConversation).not.toHaveBeenCalled();
+  });
+
   it("sends with platform submit shortcut", async () => {
     const onSend = vi.fn();
     const { user } = renderWorkspace({ onSend });
@@ -234,6 +261,30 @@ describe("ChatWorkspace", () => {
     await user.type(screen.getByLabelText("输入消息"), "你好{Meta>}{Enter}{/Meta}");
 
     expect(onSend).toHaveBeenCalledWith({ text: "你好", attachments: [] });
+  });
+
+  it("sends with Enter and keeps Shift+Enter for line breaks", async () => {
+    const onSend = vi.fn();
+    const { user } = renderWorkspace({ onSend });
+    const input = screen.getByLabelText("输入消息");
+
+    await user.type(input, "第一行{Shift>}{Enter}{/Shift}第二行");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("第一行\n第二行");
+
+    await user.keyboard("{Enter}");
+    expect(onSend).toHaveBeenCalledWith({ text: "第一行\n第二行", attachments: [] });
+  });
+
+  it("shows a concise empty conversation prompt", () => {
+    renderWorkspace({
+      activeConversation: {
+        ...activeConversation,
+        messages: [],
+      },
+    });
+
+    expect(screen.getByText("输入第一条消息开始对话")).toBeInTheDocument();
   });
 
   it("inserts a novel chapter action prompt into the composer draft", async () => {

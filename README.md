@@ -4,7 +4,7 @@ iLlama 是一个面向 Windows/macOS 的轻量 llama.cpp 可视化启动器。�
 
 ## 当前状态
 
-iLlama 已演进到 v2.1.1：Tauri v2 + React + TypeScript + Rust，专注本地 GGUF + 完整对话工作区。
+iLlama 已演进到 v2.1.2：Tauri v2 + React + TypeScript + Rust，专注本地 GGUF + 完整对话工作区。
 
 核心能力：
 
