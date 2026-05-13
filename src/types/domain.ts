@@ -48,6 +48,23 @@ export interface StartupParameters {
   mmprojOffload: boolean;
 }
 
+/** Substrings for matching Prometheus metric names; leave arrays empty to use built-in defaults. */
+export interface PrometheusHintsConfig {
+  kvSubstrings: string[];
+  promptSubstrings: string[];
+  generationAnyOf: string[];
+  generationRequired: string[];
+}
+
+export function emptyPrometheusHintsConfig(): PrometheusHintsConfig {
+  return {
+    kvSubstrings: [],
+    promptSubstrings: [],
+    generationAnyOf: [],
+    generationRequired: [],
+  };
+}
+
 export interface SamplingParameters {
   temperature: number;
   topP: number;
@@ -74,6 +91,7 @@ export interface LaunchConfig {
   host: "127.0.0.1";
   port: number;
   parameters: StartupParameters;
+  prometheusHints: PrometheusHintsConfig;
 }
 
 export interface ValidationResult {
@@ -95,28 +113,4 @@ export interface RuntimeMetrics {
   tokensPerSecond: number | null;
   promptTokensPerSecond: number | null;
   kvCacheUsageRatio: number | null;
-}
-
-export interface ChatImageAttachment {
-  id: string;
-  name: string;
-  mimeType: string;
-  sizeBytes: number;
-  dataUrl: string;
-  /** Small preview for display in message history (avoids retaining full base64). */
-  thumbnailUrl?: string;
-}
-
-export interface PendingChatMessage {
-  text: string;
-  attachments: ChatImageAttachment[];
-}
-
-export interface ChatMessage {
-  id: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  attachments?: ChatImageAttachment[];
-  createdAt: string;
-  streaming?: boolean;
 }

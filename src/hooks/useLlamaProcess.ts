@@ -10,6 +10,9 @@ import {
 import type { LaunchConfig, LogEntry, RuntimeMetrics, RuntimeStatus } from "../types/domain";
 
 const HEALTH_POLL_INTERVAL_MS = 5_000;
+const HEALTH_STARTUP_TIMEOUT_MS = 120_000;
+const HEALTH_STARTUP_INITIAL_DELAY_MS = 800;
+const HEALTH_STARTUP_MAX_DELAY_MS = 4_000;
 
 const idleMetrics: RuntimeMetrics = {
   cpuPercent: null,
@@ -29,11 +32,16 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>("idle");
   const [runtimeMetrics, setRuntimeMetrics] = useState<RuntimeMetrics>(idleMetrics);
   const healthPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startupAbortRef = useRef<AbortController | null>(null);
 
   const stopHealthPoll = useCallback(() => {
     if (healthPollRef.current !== null) {
       clearInterval(healthPollRef.current);
       healthPollRef.current = null;
+    }
+    if (startupAbortRef.current) {
+      startupAbortRef.current.abort();
+      startupAbortRef.current = null;
     }
   }, []);
 
@@ -58,32 +66,57 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
     }, HEALTH_POLL_INTERVAL_MS);
   }, [appendSystemLog, mergeLogs, stopHealthPoll]);
 
-  const pollUntilHealthy = useCallback(async (healthPort: number) => {
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
-      const snapshot = await runtimeSnapshot();
-      setRuntimeMetrics(snapshot.metrics);
-      mergeLogs(snapshot.logs);
-      if (snapshot.status === "stopped" || snapshot.status === "failed") {
-        setRuntimeStatus(snapshot.status);
-        if (snapshot.lastError) {
-          appendSystemLog(snapshot.lastError);
+  const pollUntilHealthy = useCallback(
+    async (healthPort: number) => {
+      const controller = new AbortController();
+      startupAbortRef.current = controller;
+      const startedAt = performance.now();
+      let delay = HEALTH_STARTUP_INITIAL_DELAY_MS;
+
+      while (!controller.signal.aborted) {
+        const elapsed = performance.now() - startedAt;
+        if (elapsed >= HEALTH_STARTUP_TIMEOUT_MS) {
+          if (!controller.signal.aborted) {
+            setRuntimeStatus("failed");
+            appendSystemLog(
+              `健康检查在 ${Math.round(HEALTH_STARTUP_TIMEOUT_MS / 1000)} 秒内未通过，请查看启动日志或检查模型文件。`,
+            );
+          }
+          startupAbortRef.current = null;
+          return;
         }
-        return;
+        await new Promise((resolve) => window.setTimeout(resolve, delay));
+        if (controller.signal.aborted) {
+          startupAbortRef.current = null;
+          return;
+        }
+        const snapshot = await runtimeSnapshot();
+        setRuntimeMetrics(snapshot.metrics);
+        mergeLogs(snapshot.logs);
+        if (snapshot.status === "stopped" || snapshot.status === "failed") {
+          setRuntimeStatus(snapshot.status);
+          if (snapshot.lastError) {
+            appendSystemLog(snapshot.lastError);
+          }
+          startupAbortRef.current = null;
+          return;
+        }
+        const health = await checkHealth("127.0.0.1", healthPort);
+        if (health.healthy) {
+          await confirmHealth();
+          setRuntimeStatus("healthy");
+          appendSystemLog("健康检查通过，可以开始对话。");
+          startupAbortRef.current = null;
+          startHealthPoll();
+          onHealthy?.();
+          return;
+        }
+        delay = Math.min(HEALTH_STARTUP_MAX_DELAY_MS, Math.round(delay * 1.4));
       }
-      const health = await checkHealth("127.0.0.1", healthPort);
-      if (health.healthy) {
-        await confirmHealth();
-        setRuntimeStatus("healthy");
-        appendSystemLog("健康检查通过，可以开始对话。");
-        startHealthPoll();
-        onHealthy?.();
-        return;
-      }
-    }
-    setRuntimeStatus("failed");
-    appendSystemLog("健康检查超时，请查看启动日志。");
-  }, [appendSystemLog, mergeLogs, startHealthPoll, onHealthy]);
+      startupAbortRef.current = null;
+    },
+    [appendSystemLog, mergeLogs, startHealthPoll, onHealthy],
+  );
 
   const handleStart = useCallback(
     async (config: LaunchConfig) => {

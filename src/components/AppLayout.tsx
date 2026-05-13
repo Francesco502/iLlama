@@ -1,5 +1,5 @@
-import { Settings2, MessageCircle, ChevronDown, Square } from "lucide-react";
-import { type ReactNode, useEffect, useRef } from "react";
+import { Settings2, MessageCircle, ChevronDown, HelpCircle, Square } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { LogEntry, RuntimeMetrics, RuntimeStatus } from "../types/domain";
 import { formatBytes } from "../lib/format";
 
@@ -13,6 +13,7 @@ interface AppLayoutProps {
   runtimeStatus: RuntimeStatus;
   runtimeMetrics: RuntimeMetrics;
   onStop: () => void;
+  onClearLogs?: () => void;
 }
 
 const statusLabel: Record<RuntimeStatus, string> = {
@@ -35,8 +36,12 @@ export function AppLayout({
   runtimeStatus,
   runtimeMetrics,
   onStop,
+  onClearLogs,
 }: AppLayoutProps) {
-  const [logOpen, setLogOpen] = React.useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const [logFilter, setLogFilter] = useState<"all" | "stdout" | "stderr" | "system">("all");
+  const [logQuery, setLogQuery] = useState("");
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
   const canStop = runtimeStatus === "starting" || runtimeStatus === "healthy";
 
@@ -47,16 +52,26 @@ export function AppLayout({
     }
   }, [logs, logOpen]);
 
-  // Keyboard shortcut: Esc closes log panel
+  // Keyboard shortcut: Esc closes log panel / shortcuts modal
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape" && logOpen) {
-        setLogOpen(false);
+      if (event.key === "Escape") {
+        if (shortcutsOpen) setShortcutsOpen(false);
+        else if (logOpen) setLogOpen(false);
+        return;
+      }
+      if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const target = event.target as HTMLElement | null;
+        const isEditable =
+          target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
+        if (isEditable) return;
+        event.preventDefault();
+        setShortcutsOpen((value) => !value);
       }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [logOpen]);
+  }, [logOpen, shortcutsOpen]);
 
   return (
     <>
@@ -91,13 +106,57 @@ export function AppLayout({
 
       {/* Log Drawer */}
       <div className="log-drawer" data-open={logOpen}>
-        <div className="log-drawer-inner">
-          {logs.map((log) => (
-            <div className="log-line" data-stream={log.stream} key={log.id}>
-              <span>{log.timestamp}</span>
-              <code>{log.message}</code>
+        {logOpen && (
+          <div className="log-drawer-toolbar">
+            <div className="log-filter-group" role="tablist" aria-label="日志过滤">
+              {(["all", "stdout", "stderr", "system"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  role="tab"
+                  aria-selected={logFilter === kind}
+                  data-active={logFilter === kind}
+                  onClick={() => setLogFilter(kind)}
+                >
+                  {kind === "all" ? "全部" : kind}
+                </button>
+              ))}
             </div>
-          ))}
+            <input
+              className="log-search"
+              type="text"
+              placeholder="搜索日志"
+              aria-label="搜索日志"
+              value={logQuery}
+              onChange={(event) => setLogQuery(event.target.value)}
+            />
+            {onClearLogs && (
+              <button
+                className="log-clear-btn"
+                type="button"
+                aria-label="清空日志"
+                onClick={onClearLogs}
+                disabled={logs.length === 0}
+              >
+                清空
+              </button>
+            )}
+          </div>
+        )}
+        <div className="log-drawer-inner">
+          {logs
+            .filter((log) => (logFilter === "all" ? true : log.stream === logFilter))
+            .filter((log) => {
+              const query = logQuery.trim().toLowerCase();
+              if (!query) return true;
+              return log.message.toLowerCase().includes(query);
+            })
+            .map((log) => (
+              <div className="log-line" data-stream={log.stream} key={log.id}>
+                <span>{log.timestamp}</span>
+                <code>{log.message}</code>
+              </div>
+            ))}
           <div ref={logEndRef} />
         </div>
       </div>
@@ -143,6 +202,15 @@ export function AppLayout({
             </button>
           )}
           <button
+            className="shortcuts-button"
+            type="button"
+            aria-label="查看快捷键"
+            title="快捷键（?）"
+            onClick={() => setShortcutsOpen(true)}
+          >
+            <HelpCircle size={12} />
+          </button>
+          <button
             className="log-toggle-btn"
             type="button"
             data-open={logOpen}
@@ -153,9 +221,51 @@ export function AppLayout({
           </button>
         </div>
       </div>
+      {shortcutsOpen && (
+        <div
+          className="shortcuts-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="快捷键"
+          onClick={() => setShortcutsOpen(false)}
+        >
+          <div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="shortcuts-header">
+              <h2>快捷键</h2>
+              <button
+                type="button"
+                aria-label="关闭"
+                className="shortcuts-close"
+                onClick={() => setShortcutsOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <dl className="shortcuts-grid">
+              <dt>聚焦搜索框</dt>
+              <dd>
+                <kbd>⌘/Ctrl</kbd> + <kbd>K</kbd>
+              </dd>
+              <dt>新建对话</dt>
+              <dd>
+                <kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>
+              </dd>
+              <dt>发送消息</dt>
+              <dd>
+                <kbd>⌘/Ctrl</kbd> + <kbd>Enter</kbd>
+              </dd>
+              <dt>取消生成 / 关闭面板</dt>
+              <dd>
+                <kbd>Esc</kbd>
+              </dd>
+              <dt>显示此面板</dt>
+              <dd>
+                <kbd>?</kbd>
+              </dd>
+            </dl>
+          </div>
+        </div>
+      )}
     </>
   );
 }
-
-// React import needed for useState inside AppLayout
-import React from "react";

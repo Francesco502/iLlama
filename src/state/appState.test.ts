@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getProfileById } from "../lib/parameterSchema";
 import type { ModelDirectory, ModelEntry } from "../types/domain";
+import { emptyPrometheusHintsConfig } from "../types/domain";
 import {
   buildSettingsSnapshot,
   mergeScannedModels,
@@ -69,13 +70,21 @@ describe("app state helpers", () => {
       selectedModelPath: "/models/a/model-a.gguf",
       port: 9090,
       startupParameters: parameters,
+      prometheusHints: emptyPrometheusHintsConfig(),
     });
 
     expect(snapshot).toMatchObject({
+      schemaVersion: 2,
       modelDirectories: ["/models/a"],
       llamaServerPath: "/bin/llama-server",
       defaultPort: 9090,
       idleSleepSeconds: 30,
+      chatHistory: {
+        enabled: true,
+        imagePersistence: "thumbnail",
+        includeReasoningInExportDefault: false,
+        maxConversations: 200,
+      },
     });
   });
 });

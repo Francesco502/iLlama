@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "iLlama",
-  "version": "1.0.0",
+  "version": "2.1.1",
   "identifier": "com.illama.mac",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -34,6 +34,7 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
+      "icons/icon.ico",
       "icons/icon.png"
     ],
     "macOS": {

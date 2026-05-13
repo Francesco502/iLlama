@@ -3,10 +3,18 @@ import type {
   LaunchConfig,
   LogEntry,
   ModelEntry,
+  PrometheusHintsConfig,
   RuntimeMetrics,
   RuntimeStatus,
   ValidationResult,
 } from "../types/domain";
+
+export interface ChatHistorySettings {
+  enabled: boolean;
+  imagePersistence: "none" | "thumbnail" | "full";
+  includeReasoningInExportDefault: boolean;
+  maxConversations: number;
+}
 
 export interface AppSettings {
   schemaVersion: number;
@@ -17,7 +25,9 @@ export interface AppSettings {
   autoPort: boolean;
   defaultPort: number;
   idleSleepSeconds: number;
-  saveChatHistory: boolean;
+  saveChatHistory?: boolean;
+  chatHistory: ChatHistorySettings;
+  prometheusHints?: PrometheusHintsConfig;
 }
 
 export interface RuntimeSnapshot {

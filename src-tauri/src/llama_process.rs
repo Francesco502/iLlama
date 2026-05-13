@@ -1,10 +1,13 @@
 use crate::{
     health::{http_get, is_port_available},
     monitor::{
-        collect_process_metrics, empty_metrics, merge_metrics, parse_prometheus_metrics,
-        RuntimeMetrics,
+        collect_process_metrics, empty_metrics, merge_metrics, parse_prometheus_metrics_with_hints,
+        PrometheusMetricHints, RuntimeMetrics,
     },
-    parameters::{build_command_args, validate_launch_config, LaunchConfig},
+    parameters::{
+        build_command_args, prometheus_metric_hints_from_config, validate_launch_config,
+        LaunchConfig,
+    },
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -66,6 +69,7 @@ struct InnerState {
     metrics_enabled: bool,
     last_error: Option<String>,
     health_confirmed: bool,
+    metric_hints: PrometheusMetricHints,
 }
 
 impl Default for LlamaProcessState {
@@ -127,7 +131,10 @@ impl LlamaProcessState {
                             .map(|response| {
                                 merge_metrics(
                                     process_metrics.clone(),
-                                    parse_prometheus_metrics(&response.body),
+                                    parse_prometheus_metrics_with_hints(
+                                        &response.body,
+                                        &state.metric_hints,
+                                    ),
                                 )
                             })
                             .unwrap_or(process_metrics),
@@ -228,6 +235,7 @@ impl LlamaProcessState {
         state.active_host = Some(config.host);
         state.active_port = Some(config.port);
         state.metrics_enabled = config.parameters.metrics;
+        state.metric_hints = prometheus_metric_hints_from_config(&config.prometheus_hints);
         state.last_error = None;
         state.health_confirmed = false;
         state.child = Some(child);
@@ -253,6 +261,7 @@ impl LlamaProcessState {
         state.active_host = None;
         state.active_port = None;
         state.metrics_enabled = false;
+        state.metric_hints = PrometheusMetricHints::default();
         state.health_confirmed = false;
         Ok(RuntimeSnapshot {
             status: RuntimeStatus::Stopped,

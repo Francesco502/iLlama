@@ -1,7 +1,13 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { reportErrorBoundaryError } from "../lib/errorBoundaryEvents";
+
+type ErrorBoundaryVariant = "app" | "inline";
 
 interface Props {
   children: ReactNode;
+  variant?: ErrorBoundaryVariant;
+  /** Used with variant="inline" for a11y. */
+  title?: string;
 }
 
 interface State {
@@ -21,10 +27,32 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("ErrorBoundary caught:", error, info.componentStack);
+    reportErrorBoundaryError(error, info.componentStack);
   }
 
   render() {
+    const variant = this.props.variant ?? "app";
     if (this.state.hasError) {
+      if (variant === "inline") {
+        return (
+          <div
+            className="error-boundary-inline"
+            role="alert"
+            aria-live="polite"
+            aria-label={this.props.title ?? "内容渲染错误"}
+          >
+            <p className="error-boundary-inline-title">{this.props.title ?? "内容渲染出错"}</p>
+            <p className="error-boundary-inline-msg">{this.state.error?.message ?? "未知错误"}</p>
+            <button
+              type="button"
+              className="ghost-button compact"
+              onClick={() => this.setState({ hasError: false, error: null })}
+            >
+              重试
+            </button>
+          </div>
+        );
+      }
       return (
         <div
           style={{
