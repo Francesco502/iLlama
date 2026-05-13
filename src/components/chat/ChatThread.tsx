@@ -6,16 +6,22 @@ interface ChatThreadProps {
   conversation: ChatConversation | null;
   streaming: boolean;
   onBranchFromMessage: (messageId: string) => void;
+  onEditAndResend: (messageId: string, text: string) => void;
   onRegenerate: (messageId: string) => void;
   onDeleteMessage: (messageId: string) => void;
+  onContinueAssistant: (assistantMessageId: string) => void | Promise<void>;
+  onOpenSamplingTab: () => void;
 }
 
 export function ChatThread({
   conversation,
   streaming,
   onBranchFromMessage,
+  onEditAndResend,
   onRegenerate,
   onDeleteMessage,
+  onContinueAssistant,
+  onOpenSamplingTab,
 }: ChatThreadProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
@@ -41,14 +47,18 @@ export function ChatThread({
   }
 
   return (
-    <div className="chat-thread" ref={listRef}>
+    <div className="chat-thread" ref={listRef} aria-label="消息列表" aria-live={streaming ? "polite" : "off"}>
       {conversation.messages.map((message) => (
         <ChatMessageItem
           key={message.id}
           message={message}
+          streaming={streaming}
           onBranch={() => onBranchFromMessage(message.id)}
           onDelete={() => onDeleteMessage(message.id)}
+          onEdit={(text) => onEditAndResend(message.id, text)}
           onRegenerate={() => onRegenerate(message.id)}
+          onContinue={() => void onContinueAssistant(message.id)}
+          onOpenSamplingTab={onOpenSamplingTab}
         />
       ))}
       {showJump && (

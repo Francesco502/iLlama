@@ -1,5 +1,4 @@
 import type {
-  FlashAttentionSetting,
   GpuLayerSetting,
   LaunchConfig,
   ParameterProfile,

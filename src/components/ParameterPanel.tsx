@@ -1,6 +1,6 @@
 import { FileSearch, Settings2 } from "lucide-react";
 import { builtInProfiles } from "../lib/parameterSchema";
-import type { ParameterProfile, StartupParameters, ValidationResult } from "../types/domain";
+import type { ParameterProfile, PrometheusHintsConfig, StartupParameters, ValidationResult } from "../types/domain";
 
 interface ParameterPanelProps {
   profile: ParameterProfile;
@@ -10,6 +10,8 @@ interface ParameterPanelProps {
   mmprojCandidates?: string[];
   onSelectMmproj?: () => void;
   validation?: ValidationResult;
+  prometheusHints: PrometheusHintsConfig;
+  onPrometheusHintsChange: (next: PrometheusHintsConfig) => void;
   onProfileChange: (id: ParameterProfile["id"]) => void;
   onParametersChange: (parameters: StartupParameters) => void;
 }
@@ -18,6 +20,8 @@ export function ParameterPanel({
   profile, parameters, port, onPortChange,
   mmprojCandidates = [], onSelectMmproj,
   validation,
+  prometheusHints,
+  onPrometheusHintsChange,
   onProfileChange, onParametersChange,
 }: ParameterPanelProps) {
   function update<K extends keyof StartupParameters>(key: K, value: StartupParameters[K]) {
@@ -49,6 +53,11 @@ export function ParameterPanel({
           { value: "off", label: "关闭" },
         ]} onChange={(v) => update("flashAttention", v as StartupParameters["flashAttention"])} />
         <NumberField label="端口号" value={port} onChange={onPortChange} />
+        <NumberField
+          label="空闲休眠（秒，0 表示禁用）"
+          value={parameters.idleSleepSeconds}
+          onChange={(v) => update("idleSleepSeconds", Math.max(0, v))}
+        />
       </div>
 
       {validation && (validation.errors.length > 0 || validation.warnings.length > 0) && (
@@ -94,8 +103,70 @@ export function ParameterPanel({
         <ToggleRow label="Metrics 监控" enabled={parameters.metrics} onToggle={() => update("metrics", !parameters.metrics)} />
         <ToggleRow label="mlock 锁定内存" enabled={parameters.mlock} warning onToggle={() => update("mlock", !parameters.mlock)} />
       </div>
+
+      <details className="prometheus-hints-details">
+        <summary>Prometheus 指标名子串（高级，可选）</summary>
+        <p className="prometheus-hints-help">
+          逗号分隔；留空则使用内置默认。KV 至少 2 段；Prompt 至少 3 段；生成 TPS 需「任含」与「必含」两组子串。
+        </p>
+        <div className="form-grid prometheus-hints-grid">
+          <CsvHintsField
+            label="KV cache 子串"
+            value={prometheusHints.kvSubstrings}
+            onChange={(kvSubstrings) => onPrometheusHintsChange({ ...prometheusHints, kvSubstrings })}
+          />
+          <CsvHintsField
+            label="Prompt TPS 子串"
+            value={prometheusHints.promptSubstrings}
+            onChange={(promptSubstrings) => onPrometheusHintsChange({ ...prometheusHints, promptSubstrings })}
+          />
+          <CsvHintsField
+            label="生成 TPS（任含其一）"
+            value={prometheusHints.generationAnyOf}
+            onChange={(generationAnyOf) => onPrometheusHintsChange({ ...prometheusHints, generationAnyOf })}
+          />
+          <CsvHintsField
+            label="生成 TPS（须全部包含）"
+            value={prometheusHints.generationRequired}
+            onChange={(generationRequired) => onPrometheusHintsChange({ ...prometheusHints, generationRequired })}
+          />
+        </div>
+      </details>
     </section>
   );
+}
+
+function CsvHintsField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <label className="field field-stretch">
+      <span>{label}</span>
+      <textarea
+        rows={2}
+        spellCheck={false}
+        value={csvFromList(value)}
+        onChange={(e) => onChange(listFromCsv(e.target.value))}
+      />
+    </label>
+  );
+}
+
+function csvFromList(list: string[]): string {
+  return list.join(", ");
+}
+
+function listFromCsv(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {

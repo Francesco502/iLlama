@@ -65,6 +65,7 @@ pub fn save_chat_conversation(
     write_json_atomic(&path, conversation)?;
 
     let mut index = load_chat_history_index(app_data_dir)?;
+    index.schema_version = CHAT_HISTORY_SCHEMA_VERSION;
     index.conversations.retain(|item| item.id != summary.id);
     index.conversations.push(summary);
     sort_conversation_summaries(&mut index.conversations);
@@ -80,6 +81,7 @@ pub fn delete_chat_conversation(app_data_dir: &Path, id: &str) -> io::Result<Cha
     }
 
     let mut index = load_chat_history_index(app_data_dir)?;
+    index.schema_version = CHAT_HISTORY_SCHEMA_VERSION;
     index.conversations.retain(|item| item.id != id);
     save_chat_history_index(app_data_dir, &index)?;
     Ok(index)
@@ -155,9 +157,11 @@ fn conversation_path(app_data_dir: &Path, id: &str) -> PathBuf {
     conversations_dir(app_data_dir).join(format!("{id}.json"))
 }
 
+pub const CHAT_HISTORY_SCHEMA_VERSION: u32 = 2;
+
 fn empty_index() -> ChatHistoryIndex {
     ChatHistoryIndex {
-        schema_version: 1,
+        schema_version: CHAT_HISTORY_SCHEMA_VERSION,
         conversations: Vec::new(),
     }
 }
@@ -242,6 +246,17 @@ fn render_markdown_export(conversation: &Value, include_reasoning: bool) -> Stri
     let mut output = format!(
         "# {title}\n\n- Model: {model_name}\n- Created: {created_at}\n- Updated: {updated_at}\n\n"
     );
+
+    if let Some(summary) = conversation
+        .get("memory")
+        .and_then(|memory| value_str(memory, "summary"))
+        .map(str::trim)
+        .filter(|summary| !summary.is_empty())
+    {
+        output.push_str("## 长期记忆\n\n");
+        output.push_str(summary);
+        output.push_str("\n\n");
+    }
 
     if let Some(messages) = conversation.get("messages").and_then(Value::as_array) {
         for message in messages {

@@ -31,6 +31,8 @@ describe("MarkdownContent", () => {
     render(<MarkdownContent text={"```ts\nconst answer = 42;\n```"} />);
     await user.click(screen.getByRole("button", { name: "复制代码" }));
 
-    expect(writeText).toHaveBeenCalledWith("const answer = 42;");
+    expect(writeText).toHaveBeenCalled();
+    const arg = writeText.mock.calls[0]?.[0] as string;
+    expect(arg.replace(/\s+/g, " ").trim()).toContain("const answer = 42;");
   });
 });

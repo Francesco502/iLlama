@@ -1,18 +1,22 @@
-import { Copy, GitBranch, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, GitBranch, Pencil, RotateCcw, Trash2 } from "lucide-react";
 
 interface MessageActionsProps {
   content: string;
+  canEdit: boolean;
   canRegenerate: boolean;
   onBranch: () => void;
   onDelete: () => void;
+  onEdit: () => void;
   onRegenerate: () => void;
 }
 
 export function MessageActions({
   content,
+  canEdit,
   canRegenerate,
   onBranch,
   onDelete,
+  onEdit,
   onRegenerate,
 }: MessageActionsProps) {
   return (
@@ -20,6 +24,11 @@ export function MessageActions({
       <button type="button" aria-label="复制消息" disabled={!content} onClick={() => void navigator.clipboard?.writeText(content)}>
         <Copy size={12} />
       </button>
+      {canEdit && (
+        <button type="button" aria-label="编辑消息" onClick={onEdit}>
+          <Pencil size={12} />
+        </button>
+      )}
       {canRegenerate && (
         <button type="button" aria-label="重新生成" onClick={onRegenerate}>
           <RotateCcw size={12} />

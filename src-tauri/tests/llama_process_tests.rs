@@ -90,5 +90,6 @@ fn config(binary: &str, model: &str, port: u16) -> LaunchConfig {
             mmproj_path: None,
             mmproj_offload: true,
         },
+        prometheus_hints: Default::default(),
     }
 }

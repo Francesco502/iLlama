@@ -1,6 +1,6 @@
 use illama_lib::chat_history::{
-    delete_chat_conversation, load_chat_conversation, load_chat_history_index,
-    save_chat_conversation,
+    delete_chat_conversation, export_chat_conversation, load_chat_conversation,
+    load_chat_history_index, save_chat_conversation,
 };
 
 fn sample_conversation(id: &str, title: &str) -> serde_json::Value {
@@ -42,7 +42,7 @@ fn loads_empty_chat_history_index_when_missing() {
 
     let index = load_chat_history_index(dir.path()).unwrap();
 
-    assert_eq!(index.schema_version, 1);
+    assert_eq!(index.schema_version, 2);
     assert!(index.conversations.is_empty());
 }
 
@@ -89,6 +89,23 @@ fn deletes_chat_conversation() {
 
     assert!(index.conversations.is_empty());
     assert!(loaded.is_none());
+}
+
+#[test]
+fn exports_markdown_with_long_term_memory_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut conversation = sample_conversation("conversation-1", "测试对话");
+    conversation["memory"] = serde_json::json!({
+        "summary": "用户正在写海边灯塔小说"
+    });
+    save_chat_conversation(dir.path(), &conversation).unwrap();
+
+    let export_path =
+        export_chat_conversation(dir.path(), "conversation-1", "markdown", false).unwrap();
+    let markdown = std::fs::read_to_string(export_path).unwrap();
+
+    assert!(markdown.contains("## 长期记忆"));
+    assert!(markdown.contains("用户正在写海边灯塔小说"));
 }
 
 #[test]

@@ -1,40 +1,46 @@
 import { FileCog, Play, Cpu } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { computeContextLengthMismatch } from "./app/modelWorkspace";
 import { AppLayout } from "./components/AppLayout";
 import { ChatWorkspace } from "./components/chat/ChatWorkspace";
 import { CommandPreview } from "./components/CommandPreview";
 import { ModelDirectoryPicker } from "./components/ModelDirectoryPicker";
 import { ModelList } from "./components/ModelList";
 import { ParameterPanel } from "./components/ParameterPanel";
+import { SamplingPanel } from "./components/SamplingPanel";
 import {
   isTauriRuntime,
   findAvailablePort,
-  loadSettings,
   resolveLlamaServerPath,
-  saveSettings,
-  scanModelDirectory,
-  type AppSettings,
   type ChatHistorySettings,
 } from "./api/tauri";
+import { exportChatConversation } from "./api/chatHistory";
 import { buildCommandPreview, getProfileById, validateLaunchConfig } from "./lib/parameterSchema";
 import { demoModelDirectories, demoModels } from "./state/appStore";
 import {
   buildSettingsSnapshot,
   defaultChatHistorySettings,
-  mergeScannedModels,
-  pickSelectedModelPath,
-  removeDirectoryModels,
 } from "./state/appState";
+import { useAppBootstrap } from "./hooks/useAppBootstrap";
+import { useDebouncedSettingsPersist } from "./hooks/useDebouncedSettingsPersist";
 import { useLlamaProcess } from "./hooks/useLlamaProcess";
+import { useModelDirectoryScanning } from "./hooks/useModelDirectoryScanning";
+import { useAppLogs } from "./hooks/useAppLogs";
 import { useChatGeneration } from "./hooks/useChatGeneration";
 import { useChatWorkspace } from "./hooks/useChatWorkspace";
-import type {
-  LogEntry,
-  ModelDirectory,
-  ModelEntry,
-  ParameterProfile,
-  RuntimeMetrics,
+import {
+  formatErrorBoundaryLog,
+  subscribeToErrorBoundaryReports,
+} from "./lib/errorBoundaryEvents";
+import {
+  emptyPrometheusHintsConfig,
+  type LogEntry,
+  type ModelDirectory,
+  type ModelEntry,
+  type ParameterProfile,
+  type PrometheusHintsConfig,
+  type RuntimeMetrics,
 } from "./types/domain";
 
 const DEFAULT_PORT = 8080;
@@ -54,8 +60,7 @@ export function App() {
     runningInTauri ? [] : demoModelDirectories,
   );
   const [models, setModels] = useState<ModelEntry[]>(() => (runningInTauri ? [] : demoModels));
-  const [logs, setLogs] = useState<LogEntry[]>(sampleLogs);
-  const [scanning, setScanning] = useState(false);
+  const { logs, appendSystemLog, mergeLogs, clearLogs } = useAppLogs(sampleLogs);
   const [selectedModelPath, setSelectedModelPath] = useState<string | null>(() =>
     runningInTauri ? null : demoModels[0]?.path ?? null,
   );
@@ -63,46 +68,26 @@ export function App() {
   const [port, setPort] = useState(DEFAULT_PORT);
   const [profileId, setProfileId] = useState<ParameterProfile["id"]>("balanced");
   const [startupParameters, setStartupParameters] = useState(getProfileById("balanced").parameters);
+  const [prometheusHints, setPrometheusHints] = useState<PrometheusHintsConfig>(emptyPrometheusHintsConfig);
   const [activeTab, setActiveTab] = useState<"config" | "chat">("config");
   const [modelSort, setModelSort] = useState<"name" | "size" | "date">("name");
   const [chatHistory, setChatHistory] = useState<ChatHistorySettings>(
     defaultChatHistorySettings,
   );
 
-  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasBootstrappedRef = useRef(!runningInTauri);
 
   const profile = getProfileById(profileId);
   const selectedModel = models.find((model) => model.path === selectedModelPath) ?? null;
+  const [sampling, setSampling] = useState(profile.sampling);
+  const contextLengthMismatch =
+    selectedModel?.contextLength && selectedModel.contextLength > 0
+      ? computeContextLengthMismatch(selectedModel.contextLength, startupParameters.ctxSize)
+      : null;
 
-  // --- Logging helpers ---
-  const appendSystemLog = useCallback((message: string) => {
-    const timestamp = new Intl.DateTimeFormat("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(new Date());
-    setLogs((current) =>
-      [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          timestamp,
-          stream: "system" as const,
-          message,
-        },
-      ].slice(-80),
-    );
-  }, []);
-
-  const mergeLogs = useCallback((incoming: LogEntry[]) => {
-    setLogs((current) => {
-      const byId = new Map<string, LogEntry>();
-      for (const log of current) byId.set(log.id, log);
-      for (const log of incoming) byId.set(log.id, log);
-      return Array.from(byId.values()).slice(-120);
-    });
-  }, []);
+  useEffect(() => {
+    setSampling(getProfileById(profileId).sampling);
+  }, [profileId]);
 
   // --- Custom hooks ---
   const {
@@ -120,14 +105,21 @@ export function App() {
   const {
     conversations,
     activeConversation,
+    searchHaystacks,
     createConversation,
     selectConversation,
     saveConversation,
     renameConversation,
+    setPinned,
+    setArchived,
     deleteConversation,
+    deleteMessagePair,
+    clearHistory,
     branchFromMessage,
   } = useChatWorkspace({
     historyEnabled: chatHistory.enabled,
+    imagePersistence: chatHistory.imagePersistence,
+    maxConversations: chatHistory.maxConversations,
     modelPath: selectedModel?.path ?? null,
     modelName: selectedModel?.fileName ?? null,
   });
@@ -139,9 +131,11 @@ export function App() {
     cancelGeneration,
     regenerateFromMessage,
     editUserMessageAndResend,
+    continueFromAssistantMessage,
+    compressActiveConversation,
   } = useChatGeneration({
     port,
-    sampling: profile.sampling,
+    sampling,
     contextSize: startupParameters.ctxSize,
     modelPath: selectedModel?.path ?? null,
     modelName: selectedModel?.fileName ?? null,
@@ -149,6 +143,39 @@ export function App() {
     saveConversation,
     appendSystemLog,
   });
+
+  const handleChatHistoryChange = useCallback((next: ChatHistorySettings) => {
+    setChatHistory(next);
+  }, []);
+
+  const handleClearHistory = useCallback(async () => {
+    try {
+      await clearHistory();
+      appendSystemLog("已清空本地对话历史。");
+    } catch (error) {
+      appendSystemLog(error instanceof Error ? error.message : String(error));
+    }
+  }, [appendSystemLog, clearHistory]);
+
+  const handleExportConversation = useCallback(
+    async (format: "markdown" | "json", includeReasoning: boolean, conversationId?: string) => {
+      const targetId = conversationId ?? activeConversation?.id;
+      if (!targetId) {
+        return;
+      }
+      if (!runningInTauri) {
+        appendSystemLog("浏览器预览模式下不能导出对话；请在 Tauri 应用中使用。");
+        return;
+      }
+      try {
+        const path = await exportChatConversation(targetId, format, includeReasoning);
+        appendSystemLog(`已导出对话：${path}`);
+      } catch (error) {
+        appendSystemLog(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [activeConversation, appendSystemLog, runningInTauri],
+  );
 
   const commandPreview = useMemo(
     () =>
@@ -158,8 +185,9 @@ export function App() {
         host: "127.0.0.1",
         port,
         parameters: startupParameters,
+        prometheusHints,
       }),
-    [binaryPath, port, selectedModel?.path, startupParameters],
+    [binaryPath, port, prometheusHints, selectedModel?.path, startupParameters],
   );
 
   const launchValidation = useMemo(
@@ -170,8 +198,9 @@ export function App() {
         host: "127.0.0.1",
         port,
         parameters: startupParameters,
+        prometheusHints,
       }),
-    [binaryPath, port, runningInTauri, selectedModel?.path, startupParameters],
+    [binaryPath, port, prometheusHints, runningInTauri, selectedModel?.path, startupParameters],
   );
 
   const settingsSnapshot = useMemo(
@@ -184,9 +213,50 @@ export function App() {
         port,
         startupParameters,
         chatHistory,
+        prometheusHints,
       }),
-    [binaryPath, chatHistory, directories, port, profileId, selectedModelPath, startupParameters],
+    [
+      binaryPath,
+      chatHistory,
+      directories,
+      port,
+      profileId,
+      prometheusHints,
+      selectedModelPath,
+      startupParameters,
+    ],
   );
+
+  const modelScan = useModelDirectoryScanning({
+    runningInTauri,
+    appendSystemLog,
+    directories,
+    setDirectories,
+    models,
+    setModels,
+    selectedModelPath,
+    setSelectedModelPath,
+    setStartupParameters,
+  });
+  const { handleRefresh } = modelScan;
+
+  useAppBootstrap({
+    runningInTauri,
+    appendSystemLog,
+    hasBootstrappedRef,
+    setBinaryPath,
+    setPort,
+    setChatHistory,
+    setProfileId,
+    setStartupParameters,
+    setDirectories,
+    setModels,
+    setSelectedModelPath,
+    setPrometheusHints,
+    scanDirectories: modelScan.scanDirectories,
+  });
+
+  useDebouncedSettingsPersist(runningInTauri, hasBootstrappedRef, settingsSnapshot, appendSystemLog);
 
   const displayedRuntimeMetrics = useMemo<RuntimeMetrics>(
     () => ({
@@ -211,66 +281,17 @@ export function App() {
     return sorted;
   }, [models, modelSort]);
 
-  // --- Debounced auto-persist settings ---
-  const debouncedPersist = useCallback((snapshot: AppSettings) => {
-    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-    persistTimerRef.current = setTimeout(() => {
-      void saveSettings(snapshot).catch((error) => {
-        appendSystemLog(error instanceof Error ? error.message : String(error));
-      });
-    }, 1500);
-  }, [appendSystemLog]);
-
-  useEffect(() => {
-    if (!runningInTauri || !hasBootstrappedRef.current) return;
-    debouncedPersist(settingsSnapshot);
-  }, [debouncedPersist, runningInTauri, settingsSnapshot]);
-
-  // --- Bootstrap ---
-  useEffect(() => {
-    if (!runningInTauri) return;
-    let cancelled = false;
-    async function bootstrap() {
-      try {
-        const settings = await loadSettings();
-        if (cancelled) return;
-        const resolvedBinary = await resolveLlamaServerPath(settings.llamaServerPath);
-        if (cancelled) return;
-        setBinaryPath(resolvedBinary ?? settings.llamaServerPath);
-        setPort(settings.defaultPort || DEFAULT_PORT);
-        setChatHistory(settings.chatHistory ?? defaultChatHistorySettings);
-        const loadedProfileId = (settings.defaultPresetId as ParameterProfile["id"]) || "balanced";
-        setProfileId(loadedProfileId);
-        setStartupParameters({
-          ...getProfileById(loadedProfileId).parameters,
-          idleSleepSeconds: settings.idleSleepSeconds,
-        });
-
-        if (settings.modelDirectories.length > 0) {
-          await scanDirectories(settings.modelDirectories, settings.lastSelectedModelPath);
-        } else {
-          setDirectories([]);
-          setModels([]);
-          setSelectedModelPath(null);
-          appendSystemLog("请选择模型目录以扫描 GGUF 模型。");
-        }
-      } catch (error) {
-        appendSystemLog(error instanceof Error ? error.message : String(error));
-      } finally {
-        hasBootstrappedRef.current = true;
-      }
-    }
-    void bootstrap();
-    return () => { cancelled = true; };
-  }, [appendSystemLog, runningInTauri]);
-
-  // --- Cleanup ---
   useEffect(() => {
     return () => {
       stopHealthPoll();
-      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     };
   }, [stopHealthPoll]);
+
+  useEffect(() => {
+    return subscribeToErrorBoundaryReports((report) => {
+      appendSystemLog(formatErrorBoundaryLog(report));
+    });
+  }, [appendSystemLog]);
 
   // --- #23: Keyboard shortcuts ---
   useEffect(() => {
@@ -290,27 +311,9 @@ export function App() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [directories]);
+  }, [handleRefresh]);
 
   // --- Handlers ---
-  async function handleAddDirectory() {
-    if (!runningInTauri) {
-      appendSystemLog("浏览器预览模式下使用演示模型；在 Tauri 应用中会打开原生目录选择。");
-      return;
-    }
-    const selected = await open({ title: "选择 GGUF 模型目录", directory: true, multiple: false });
-    if (typeof selected !== "string") return;
-    await scanDirectory(selected);
-  }
-
-  function handleRemoveDirectory(path: string) {
-    const nextModels = removeDirectoryModels(models, path);
-    setDirectories((current) => current.filter((d) => d.path !== path));
-    setModels(nextModels);
-    setSelectedModelPath((current) => pickSelectedModelPath(nextModels, current));
-    appendSystemLog(`已移除目录：${path}`);
-  }
-
   async function handleSelectBinary() {
     if (!runningInTauri) {
       appendSystemLog("浏览器预览模式下不能选择 llama-server；请在 Tauri 应用中使用。");
@@ -338,68 +341,6 @@ export function App() {
     appendSystemLog(`已选择 mmproj：${selected}`);
   }
 
-  async function handleRefresh() {
-    const firstReadyDirectory = directories.find((d) => d.status === "ready");
-    if (!firstReadyDirectory) {
-      appendSystemLog("请先选择模型目录。");
-      return;
-    }
-    if (!runningInTauri) {
-      appendSystemLog("浏览器预览模式下刷新演示模型列表。");
-      setModels(demoModels);
-      return;
-    }
-    await scanDirectories(directories.filter((d) => d.status === "ready").map((d) => d.path), selectedModelPath);
-  }
-
-  async function scanDirectories(paths: string[], preferredModelPath: string | null) {
-    setScanning(true);
-    setDirectories(paths.map((path) => ({ path, status: "scanning" })));
-    const allModels: ModelEntry[] = [];
-    const nextDirectories: ModelDirectory[] = [];
-
-    for (const path of paths) {
-      appendSystemLog(`开始扫描：${path}`);
-      try {
-        const scanned = await scanModelDirectory(path);
-        allModels.push(...scanned);
-        nextDirectories.push({ path, status: "ready" });
-        appendSystemLog(`扫描完成：${path}，发现 ${scanned.length} 个 GGUF 模型。`);
-      } catch (error) {
-        nextDirectories.push({ path, status: "missing" });
-        appendSystemLog(error instanceof Error ? error.message : String(error));
-      }
-    }
-
-    setDirectories(nextDirectories);
-    setModels(allModels);
-    setSelectedModelPath(pickSelectedModelPath(allModels, preferredModelPath));
-    setStartupParameters((current) => ({ ...current, mmprojPath: null }));
-    setScanning(false);
-  }
-
-  async function scanDirectory(path: string) {
-    setScanning(true);
-    setDirectories((current) => upsertDirectory(current, { path, status: "scanning" }));
-    appendSystemLog(`开始扫描：${path}`);
-    try {
-      const scanned = await scanModelDirectory(path);
-      setModels((current) => {
-        const merged = mergeScannedModels(current, path, scanned);
-        setSelectedModelPath((currentSelected) => pickSelectedModelPath(merged, currentSelected));
-        return merged;
-      });
-      setStartupParameters((current) => ({ ...current, mmprojPath: null }));
-      setDirectories((current) => upsertDirectory(current, { path, status: "ready" }));
-      appendSystemLog(`扫描完成，发现 ${scanned.length} 个 GGUF 模型。`);
-    } catch (error) {
-      setDirectories((current) => upsertDirectory(current, { path, status: "missing" }));
-      appendSystemLog(error instanceof Error ? error.message : String(error));
-    } finally {
-      setScanning(false);
-    }
-  }
-
   async function handleStart() {
     if (!selectedModel) {
       appendSystemLog("请先选择 GGUF 模型。");
@@ -413,6 +354,7 @@ export function App() {
         host: "127.0.0.1",
         port,
         parameters: startupParameters,
+        prometheusHints,
       });
       return;
     }
@@ -434,13 +376,14 @@ export function App() {
       host: "127.0.0.1",
       port,
       parameters: startupParameters,
+      prometheusHints,
     });
     if (!preflightValidation.valid) {
       preflightValidation.errors.forEach(appendSystemLog);
       return;
     }
 
-    let launchPort = port;
+    let launchPort: number;
     try {
       launchPort = await findAvailablePort("127.0.0.1", port);
       if (launchPort !== port) {
@@ -455,10 +398,11 @@ export function App() {
     const launchConfig = {
       binaryPath: resolvedBinary,
       modelPath: selectedModel.path,
-      host: "127.0.0.1",
+      host: "127.0.0.1" as const,
       port: launchPort,
       parameters: startupParameters,
-    } as const;
+      prometheusHints,
+    };
     const validation = validateLaunchConfig(launchConfig);
     if (!validation.valid) {
       validation.errors.forEach(appendSystemLog);
@@ -514,9 +458,9 @@ export function App() {
           <>
             <ModelDirectoryPicker
               directories={directories}
-              scanning={scanning}
-              onAddDirectory={handleAddDirectory}
-              onRemoveDirectory={handleRemoveDirectory}
+              scanning={modelScan.scanning}
+              onAddDirectory={modelScan.handleAddDirectory}
+              onRemoveDirectory={modelScan.handleRemoveDirectory}
               onRefresh={handleRefresh}
             />
             <ModelList
@@ -539,6 +483,30 @@ export function App() {
                   {selectedModel?.quantization ?? "GGUF"} · 上下文{" "}
                   {selectedModel?.contextLength?.toLocaleString("zh-CN") ?? "--"}
                 </p>
+                {contextLengthMismatch?.kind === "warn" && (
+                  <p className="model-context-warning">
+                    当前 `ctxSize`（{startupParameters.ctxSize.toLocaleString("zh-CN")}）大于模型元数据
+                    `contextLength`（{selectedModel?.contextLength?.toLocaleString("zh-CN")}），可能无效或浪费显存/内存。{" "}
+                    <button
+                      className="inline-button"
+                      type="button"
+                      onClick={() =>
+                        setStartupParameters((current) => ({
+                          ...current,
+                          ctxSize: contextLengthMismatch.recommendedCtxSize,
+                        }))
+                      }
+                    >
+                      一键对齐到 {contextLengthMismatch.recommendedCtxSize.toLocaleString("zh-CN")}
+                    </button>
+                  </p>
+                )}
+                {contextLengthMismatch?.kind === "info" && (
+                  <p className="model-context-info">
+                    模型支持更长上下文（{selectedModel?.contextLength?.toLocaleString("zh-CN")}），你当前 `ctxSize` 为{" "}
+                    {startupParameters.ctxSize.toLocaleString("zh-CN")}。
+                  </p>
+                )}
               </div>
               <div className="health-chip">本地 only</div>
             </section>
@@ -550,6 +518,8 @@ export function App() {
               mmprojCandidates={selectedModel?.mmprojCandidates ?? []}
               onSelectMmproj={handleSelectMmproj}
               validation={launchValidation}
+              prometheusHints={prometheusHints}
+              onPrometheusHintsChange={setPrometheusHints}
               onParametersChange={setStartupParameters}
               onProfileChange={(id) => {
                 setProfileId(id);
@@ -561,6 +531,7 @@ export function App() {
                 });
               }}
             />
+            <SamplingPanel sampling={sampling} ctxSize={startupParameters.ctxSize} onSamplingChange={setSampling} />
             <CommandPreview args={commandPreview} />
           </div>
         }
@@ -568,33 +539,45 @@ export function App() {
           <ChatWorkspace
             runtimeStatus={runtimeStatus}
             selectedModel={selectedModel}
+            ctxSize={startupParameters.ctxSize}
+            samplingMaxTokens={sampling.maxTokens}
             conversations={conversations}
             activeConversation={activeConversation}
+            searchHaystacks={searchHaystacks}
+            chatHistory={chatHistory}
             streaming={streaming}
             streamTokensPerSecond={streamTokensPerSecond}
             onCreateConversation={createConversation}
             onSelectConversation={selectConversation}
             onSaveConversation={saveConversation}
+            onCompressNow={compressActiveConversation}
             onRenameConversation={renameConversation}
+            onSetPinned={setPinned}
+            onSetArchived={setArchived}
             onDeleteConversation={deleteConversation}
+            onDeleteMessage={deleteMessagePair}
             onBranchFromMessage={branchFromMessage}
             onSend={sendMessage}
             onCancel={cancelGeneration}
             onRegenerate={regenerateFromMessage}
             onEditAndResend={editUserMessageAndResend}
+            onContinueAssistant={continueFromAssistantMessage}
+            onOpenSamplingTab={() => setActiveTab("config")}
+            runtimeMetrics={displayedRuntimeMetrics}
+            onChatHistoryChange={handleChatHistoryChange}
+            onClearHistory={handleClearHistory}
+            onExportConversation={handleExportConversation}
+            onApplySuggestedMaxTokens={(value) =>
+              setSampling((current) => ({ ...current, maxTokens: Math.max(64, value) }))
+            }
           />
         }
         logs={logs}
         runtimeStatus={runtimeStatus}
         runtimeMetrics={displayedRuntimeMetrics}
         onStop={handleStop}
+        onClearLogs={clearLogs}
       />
     </div>
   );
-}
-
-function upsertDirectory(directories: ModelDirectory[], next: ModelDirectory): ModelDirectory[] {
-  const exists = directories.some((d) => d.path === next.path);
-  if (!exists) return [...directories, next];
-  return directories.map((d) => (d.path === next.path ? next : d));
 }

@@ -14,11 +14,7 @@ export interface ChatAttachment {
   dataUrl: string;
   thumbnailUrl?: string;
   persistedPath?: string;
-  /**
-   * Optional during the v1-to-v2 component migration. New persisted v2
-   * conversations should always set this explicitly.
-   */
-  persistence?: ChatAttachmentPersistence;
+  persistence: ChatAttachmentPersistence;
 }
 
 export interface ChatGenerationStats {
@@ -26,6 +22,9 @@ export interface ChatGenerationStats {
   completedAt: string | null;
   generatedTokens: number;
   tokensPerSecond: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
   reasoningStartedAt?: string;
   reasoningCompletedAt?: string;
 }
@@ -37,6 +36,9 @@ export interface ChatModelSnapshot {
   sampling: SamplingParameters;
 }
 
+/** OpenAI / llama-server `finish_reason` (e.g. `stop`, `length`, `max_tokens`). */
+export type ChatFinishReason = string | null;
+
 export interface ChatMessage {
   id: string;
   role: ChatMessageRole;
@@ -45,16 +47,10 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   createdAt: string;
   updatedAt?: string;
-  /**
-   * Optional until the legacy in-memory chat panel is replaced by the v2
-   * workspace. New v2 messages should always set a status.
-   */
-  status?: ChatMessageStatus;
-  /**
-   * Legacy streaming marker used by the v1 chat panel during migration.
-   */
-  streaming?: boolean;
+  status: ChatMessageStatus;
   error?: string;
+  /** Set when the server reports `finish_reason` (streaming last chunk or non-streaming). */
+  finishReason?: ChatFinishReason;
   stats?: ChatGenerationStats;
   modelSnapshot?: ChatModelSnapshot;
 }
@@ -72,11 +68,34 @@ export interface ChatConversationSummary {
   modelName: string | null;
 }
 
-export interface ChatConversation extends ChatConversationSummary {
-  schemaVersion: 1;
+export type ChatConversationSchemaVersion = 1 | 2;
+
+export type ChatAssistantMode = "general" | "novel" | "analysis" | "coding" | "translation";
+
+export interface ChatCompressionSettings {
+  enabled: boolean;
+  triggerRatio: number;
+  preserveRecentTurns: number;
+  maxSummaryTokens: number;
+}
+
+export interface ChatConversationMemory {
+  summary: string;
+  updatedAt: string | null;
+  compressedMessageCount: number;
+  compressedThroughMessageId: string | null;
+}
+
+export interface ChatConversationV2 extends ChatConversationSummary {
+  schemaVersion: 2;
+  assistantMode: ChatAssistantMode;
   systemPrompt: string;
+  compression: ChatCompressionSettings;
+  memory: ChatConversationMemory;
   messages: ChatMessage[];
 }
+
+export type ChatConversation = ChatConversationV2;
 
 export interface PendingChatMessage {
   text: string;

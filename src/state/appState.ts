@@ -1,5 +1,11 @@
 import type { AppSettings, ChatHistorySettings } from "../api/tauri";
-import type { ModelDirectory, ModelEntry, ParameterProfile, StartupParameters } from "../types/domain";
+import type {
+  ModelDirectory,
+  ModelEntry,
+  ParameterProfile,
+  PrometheusHintsConfig,
+  StartupParameters,
+} from "../types/domain";
 
 export const defaultChatHistorySettings: ChatHistorySettings = {
   enabled: true,
@@ -16,6 +22,7 @@ interface SettingsSnapshotInput {
   port: number;
   startupParameters: StartupParameters;
   chatHistory?: ChatHistorySettings;
+  prometheusHints: PrometheusHintsConfig;
 }
 
 export function mergeScannedModels(
@@ -48,6 +55,7 @@ export function buildSettingsSnapshot({
   port,
   startupParameters,
   chatHistory = defaultChatHistorySettings,
+  prometheusHints,
 }: SettingsSnapshotInput): AppSettings {
   return {
     schemaVersion: 2,
@@ -61,6 +69,7 @@ export function buildSettingsSnapshot({
     defaultPort: port,
     idleSleepSeconds: startupParameters.idleSleepSeconds,
     chatHistory,
+    prometheusHints,
   };
 }
 

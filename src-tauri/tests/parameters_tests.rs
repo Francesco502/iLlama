@@ -24,6 +24,7 @@ fn base_config() -> LaunchConfig {
             mmproj_path: None,
             mmproj_offload: true,
         },
+        prometheus_hints: Default::default(),
     }
 }
 

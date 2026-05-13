@@ -1,3 +1,4 @@
+use crate::parameters::PrometheusHintsConfig;
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs, io,
@@ -26,6 +27,8 @@ pub struct AppSettings {
     pub idle_sleep_seconds: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub save_chat_history: Option<bool>,
+    #[serde(default)]
+    pub prometheus_hints: PrometheusHintsConfig,
     #[serde(default = "default_chat_history_settings")]
     pub chat_history: ChatHistorySettings,
 }
@@ -42,6 +45,7 @@ pub fn default_settings() -> AppSettings {
         default_port: 8080,
         idle_sleep_seconds: 0,
         save_chat_history: None,
+        prometheus_hints: PrometheusHintsConfig::default(),
         chat_history: default_chat_history_settings(),
     }
 }

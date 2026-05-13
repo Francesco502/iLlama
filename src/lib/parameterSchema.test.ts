@@ -5,6 +5,7 @@ import {
   validateLaunchConfig,
 } from "./parameterSchema";
 import type { LaunchConfig } from "../types/domain";
+import { emptyPrometheusHintsConfig } from "../types/domain";
 
 const baseConfig: LaunchConfig = {
   binaryPath: "/usr/local/bin/llama-server",
@@ -26,6 +27,7 @@ const baseConfig: LaunchConfig = {
     mmprojPath: null,
     mmprojOffload: true,
   },
+  prometheusHints: emptyPrometheusHintsConfig(),
 };
 
 describe("parameter schema", () => {

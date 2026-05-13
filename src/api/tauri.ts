@@ -3,6 +3,7 @@ import type {
   LaunchConfig,
   LogEntry,
   ModelEntry,
+  PrometheusHintsConfig,
   RuntimeMetrics,
   RuntimeStatus,
   ValidationResult,
@@ -26,6 +27,7 @@ export interface AppSettings {
   idleSleepSeconds: number;
   saveChatHistory?: boolean;
   chatHistory: ChatHistorySettings;
+  prometheusHints?: PrometheusHintsConfig;
 }
 
 export interface RuntimeSnapshot {

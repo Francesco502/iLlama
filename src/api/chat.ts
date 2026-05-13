@@ -1,9 +1,10 @@
-import type { ChatImageAttachment, ChatMessage, SamplingParameters } from "../types/domain";
+import type { ChatAttachment, ChatMessage } from "../types/chat";
+import type { SamplingParameters } from "../types/domain";
 
 export interface ChatRequestMessage {
   role: ChatMessage["role"];
   content: string;
-  attachments?: ChatImageAttachment[];
+  attachments?: ChatAttachment[];
 }
 
 interface ChatCompletionBodyOptions {
@@ -18,14 +19,33 @@ type ChatContentPart =
 export interface ChatStreamDelta {
   contentDelta: string;
   reasoningDelta: string;
+  usage?: ChatTokenUsage | null;
+  /** Present only on chunks where the server sets `choices[0].finish_reason` (non-empty string). */
+  finishReason?: string;
 }
 
-interface StreamChatOptions {
+export interface ChatTokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface ChatCompletionMessage {
+  content: string;
+  reasoningContent: string;
+  usage?: ChatTokenUsage | null;
+  finishReason?: string | null;
+}
+
+interface ChatCompletionOptions {
   host: string;
   port: number;
   messages: ChatRequestMessage[];
   sampling: SamplingParameters;
   signal?: AbortSignal;
+}
+
+interface StreamChatOptions extends ChatCompletionOptions {
   onToken?: (token: string) => void;
   onDelta?: (delta: ChatStreamDelta) => void;
 }
@@ -78,12 +98,42 @@ export async function streamChatCompletion({
       }
 
       const delta = parseDeltaEvent(payload);
-      if (delta.contentDelta || delta.reasoningDelta) {
+      if (
+        delta.contentDelta ||
+        delta.reasoningDelta ||
+        delta.usage !== undefined ||
+        delta.finishReason !== undefined
+      ) {
         onDelta?.(delta);
+      }
+      if (delta.contentDelta || delta.reasoningDelta) {
         onToken?.(delta.contentDelta || delta.reasoningDelta);
       }
     }
   }
+}
+
+export async function completeChatCompletion({
+  host,
+  port,
+  messages,
+  sampling,
+  signal,
+}: ChatCompletionOptions): Promise<ChatCompletionMessage> {
+  const response = await fetch(`http://${host}:${port}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(buildChatCompletionBody({ messages, sampling, stream: false })),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`聊天请求失败：HTTP ${response.status}`);
+  }
+
+  return parseCompletionMessage(await response.json());
 }
 
 export function buildChatCompletionBody({
@@ -118,27 +168,162 @@ function buildMessageContent(message: ChatRequestMessage): string | ChatContentP
     return message.content;
   }
 
-  const parts: ChatContentPart[] = [];
-  if (message.content.trim().length > 0) {
-    parts.push({ type: "text", text: message.content });
+  const imageAttachments = attachments.filter((a) => a.mimeType.toLowerCase().startsWith("image/"));
+  const textAttachments = attachments.filter(
+    (a) => !a.mimeType.toLowerCase().startsWith("image/") && isTextLikeAttachmentMime(a.mimeType, a.name),
+  );
+
+  if (imageAttachments.length === 0 && textAttachments.length === 0) {
+    return message.content;
   }
 
-  for (const attachment of attachments) {
+  let mergedText = message.content.trimEnd();
+  for (const attachment of textAttachments) {
+    const body = decodeAttachmentPlainText(attachment.dataUrl);
+    if (body == null) {
+      continue;
+    }
+    const block = `\n\n---\n[附件: ${attachment.name}]\n${body}`;
+    mergedText = mergedText ? `${mergedText}${block}` : block.trimStart();
+  }
+
+  if (imageAttachments.length === 0) {
+    return mergedText;
+  }
+
+  const parts: ChatContentPart[] = [];
+  if (mergedText.length > 0) {
+    parts.push({ type: "text", text: mergedText });
+  }
+
+  for (const attachment of imageAttachments) {
     parts.push({ type: "image_url", image_url: { url: attachment.dataUrl } });
   }
 
+  if (parts.length === 1 && parts[0]!.type === "text") {
+    return parts[0].text;
+  }
   return parts;
+}
+
+function isTextLikeAttachmentMime(mimeType: string, name: string): boolean {
+  const m = mimeType.toLowerCase();
+  if (m.startsWith("text/")) return true;
+  if (m === "application/json" || m.includes("json")) return true;
+  if (m.includes("xml") || m.includes("yaml") || m.includes("csv") || m.includes("markdown")) return true;
+  return /\.(txt|md|mdx|json|csv|ts|tsx|js|jsx|mjs|cjs|rs|py|go|java|kt|toml|yaml|yml|html|css|sh|bash)$/i.test(
+    name,
+  );
+}
+
+/** Decode data URL body as UTF-8 text (for composer "snippet" attachments). */
+export function decodeAttachmentPlainText(dataUrl: string): string | null {
+  const trimmed = dataUrl.trim();
+  const base64Match = /^data:[^;]*;base64,(.+)$/i.exec(trimmed);
+  if (base64Match) {
+    try {
+      return decodeBase64Utf8(base64Match[1].replace(/\s/g, ""));
+    } catch {
+      return null;
+    }
+  }
+  const comma = trimmed.indexOf(",");
+  if (comma < 0) {
+    return null;
+  }
+  const meta = trimmed.slice(0, comma);
+  if (!/^data:/i.test(meta)) {
+    return null;
+  }
+  const payload = trimmed.slice(comma + 1);
+  try {
+    return decodeURIComponent(payload.replace(/\+/g, " "));
+  } catch {
+    return null;
+  }
+}
+
+function decodeBase64Utf8(b64: string): string {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
+export function parseCompletionMessage(payload: unknown): ChatCompletionMessage {
+  if (!isRecord(payload) || !Array.isArray(payload.choices)) {
+    return emptyCompletionMessage();
+  }
+
+  const choice = payload.choices[0];
+  if (!isRecord(choice) || !isRecord(choice.message)) {
+    return emptyCompletionMessage();
+  }
+
+  const base: ChatCompletionMessage = {
+    content: typeof choice.message.content === "string" ? choice.message.content : "",
+    reasoningContent:
+      typeof choice.message.reasoning_content === "string" ? choice.message.reasoning_content : "",
+  };
+
+  if ("finish_reason" in choice) {
+    const fr = choice.finish_reason;
+    base.finishReason = typeof fr === "string" && fr.length > 0 ? fr : null;
+  }
+
+  // Align usage semantics with streaming:
+  // - undefined: server did not include `usage`
+  // - null: server included `usage` but we couldn't parse it
+  // - object: valid usage
+  if ("usage" in payload) {
+    base.usage = parseUsage(payload);
+  }
+  return base;
+}
+
+export function parseUsage(payload: unknown): ChatTokenUsage | null {
+  if (!isRecord(payload) || !isRecord(payload.usage)) {
+    return null;
+  }
+  const usage = payload.usage;
+
+  const promptTokens = toFiniteNonNegativeInt(usage.prompt_tokens);
+  const completionTokens = toFiniteNonNegativeInt(usage.completion_tokens);
+  const totalTokens = toFiniteNonNegativeInt(usage.total_tokens);
+
+  if (promptTokens === null || completionTokens === null || totalTokens === null) {
+    return null;
+  }
+  return { promptTokens, completionTokens, totalTokens };
 }
 
 export function parseDeltaEvent(payload: string): ChatStreamDelta {
   try {
-    const parsed = JSON.parse(payload) as {
-      choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }>;
+    const parsed = JSON.parse(payload) as unknown;
+    const parsedRecord = isRecord(parsed) ? parsed : null;
+    const usage = parsedRecord && "usage" in parsedRecord ? parseUsage(parsedRecord) : undefined;
+
+    const parsedChoices = parsedRecord?.choices;
+    const choices = Array.isArray(parsedChoices) ? parsedChoices : undefined;
+    const choice0 = choices?.[0];
+    const delta = isRecord(choice0) && isRecord(choice0.delta) ? choice0.delta : null;
+
+    let finishReason: string | undefined = undefined;
+    if (isRecord(choice0) && "finish_reason" in choice0) {
+      const fr = choice0.finish_reason;
+      if (typeof fr === "string" && fr.length > 0) {
+        finishReason = fr;
+      }
+    }
+
+    const base: Omit<ChatStreamDelta, "usage"> = {
+      contentDelta: typeof delta?.content === "string" ? delta.content : "",
+      reasoningDelta: typeof delta?.reasoning_content === "string" ? delta.reasoning_content : "",
+      ...(finishReason !== undefined ? { finishReason } : {}),
     };
-    return {
-      contentDelta: parsed.choices?.[0]?.delta?.content ?? "",
-      reasoningDelta: parsed.choices?.[0]?.delta?.reasoning_content ?? "",
-    };
+    return usage === undefined ? base : { ...base, usage };
   } catch {
     return { contentDelta: "", reasoningDelta: "" };
   }
@@ -147,4 +332,31 @@ export function parseDeltaEvent(payload: string): ChatStreamDelta {
 export function parseDeltaToken(payload: string): string {
   const delta = parseDeltaEvent(payload);
   return delta.contentDelta || delta.reasoningDelta;
+}
+
+function emptyCompletionMessage(): ChatCompletionMessage {
+  return { content: "", reasoningContent: "" };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function toFiniteNonNegativeInt(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  if (value < 0) {
+    return null;
+  }
+  return Math.floor(value);
+}
+
+/** True when the model stopped because output hit `max_tokens` / context output cap. */
+export function isLengthLikeFinishReason(reason: string | null | undefined): boolean {
+  if (reason == null || typeof reason !== "string") {
+    return false;
+  }
+  const normalized = reason.trim().toLowerCase();
+  return normalized === "length" || normalized === "max_tokens";
 }

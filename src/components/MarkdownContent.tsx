@@ -1,26 +1,10 @@
 import { Copy } from "lucide-react";
-import type { ReactNode } from "react";
+import { useCallback, useRef, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import hljs from "highlight.js/lib/core";
-import bash from "highlight.js/lib/languages/bash";
-import javascript from "highlight.js/lib/languages/javascript";
-import json from "highlight.js/lib/languages/json";
-import python from "highlight.js/lib/languages/python";
-import rust from "highlight.js/lib/languages/rust";
-import typescript from "highlight.js/lib/languages/typescript";
-
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("js", javascript);
-hljs.registerLanguage("json", json);
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("py", python);
-hljs.registerLanguage("rust", rust);
-hljs.registerLanguage("rs", rust);
-hljs.registerLanguage("typescript", typescript);
-hljs.registerLanguage("ts", typescript);
+import "highlight.js/styles/github.css";
 
 export function MarkdownContent({ text }: { text: string }): ReactNode {
   if (!text) {
@@ -31,12 +15,34 @@ export function MarkdownContent({ text }: { text: string }): ReactNode {
     <div className="markdown-content">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeSanitize]}
+        rehypePlugins={[
+          rehypeSanitize,
+          [rehypeHighlight, { detect: true }],
+        ]}
         components={markdownComponents}
       >
         {text}
       </ReactMarkdown>
     </div>
+  );
+}
+
+function PreWithToolbar({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null);
+  const copy = useCallback(async () => {
+    const root = ref.current;
+    const code = root?.querySelector("code");
+    const text = (code?.textContent ?? root?.textContent ?? "").replace(/\n+$/, "");
+    await navigator.clipboard?.writeText(text);
+  }, []);
+
+  return (
+    <pre ref={ref} className="md-code-block">
+      <button className="md-copy-btn" type="button" aria-label="复制代码" onClick={() => void copy()}>
+        <Copy size={12} />
+      </button>
+      {children}
+    </pre>
   );
 }
 
@@ -49,62 +55,20 @@ const markdownComponents: Components = {
     );
   },
   pre({ children }) {
-    return <>{children}</>;
+    return <PreWithToolbar>{children}</PreWithToolbar>;
   },
   code({ className, children, ...props }) {
-    const code = String(children).replace(/\n$/, "");
-    const language = /language-(\w+)/.exec(className ?? "")?.[1];
-    if (!language && !code.includes("\n")) {
+    if (className?.includes("hljs")) {
       return (
-        <code className="md-inline-code" {...props}>
+        <code className={className} {...props}>
           {children}
         </code>
       );
     }
-
-    return <CodeBlock code={code} language={language} />;
+    return (
+      <code className="md-inline-code" {...props}>
+        {children}
+      </code>
+    );
   },
 };
-
-function CodeBlock({ code, language }: { code: string; language?: string }) {
-  async function copyCode() {
-    await navigator.clipboard?.writeText(code);
-  }
-
-  return (
-    <pre className="md-code-block">
-      {language && <span className="md-code-lang">{language}</span>}
-      <button className="md-copy-btn" type="button" aria-label="复制代码" onClick={copyCode}>
-        <Copy size={12} />
-      </button>
-      <code
-        dangerouslySetInnerHTML={{
-          __html: highlightCode(code, language),
-        }}
-      />
-    </pre>
-  );
-}
-
-function highlightCode(code: string, language?: string): string {
-  if (!code) {
-    return "";
-  }
-
-  try {
-    if (language && hljs.getLanguage(language)) {
-      return hljs.highlight(code, { language, ignoreIllegals: true }).value;
-    }
-    return hljs.highlightAuto(code).value;
-  } catch {
-    return escapeHtml(code);
-  }
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}

@@ -1,3 +1,4 @@
+use crate::monitor::PrometheusMetricHints;
 use serde::{
     de::{Error as DeError, Unexpected, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -12,6 +13,8 @@ pub struct LaunchConfig {
     pub host: String,
     pub port: u16,
     pub parameters: StartupParameters,
+    #[serde(default)]
+    pub prometheus_hints: PrometheusHintsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,6 +62,56 @@ pub enum FlashAttentionSetting {
     Auto,
     On,
     Off,
+}
+
+/// Substring rules for matching llama.cpp Prometheus metric names (optional; all empty = built-in defaults).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PrometheusHintsConfig {
+    #[serde(default)]
+    pub kv_substrings: Vec<String>,
+    #[serde(default)]
+    pub prompt_substrings: Vec<String>,
+    #[serde(default)]
+    pub generation_any_of: Vec<String>,
+    #[serde(default)]
+    pub generation_required: Vec<String>,
+}
+
+/// Per dimension: if the user list is too short / empty, that dimension falls back to defaults.
+pub fn prometheus_metric_hints_from_config(
+    custom: &PrometheusHintsConfig,
+) -> PrometheusMetricHints {
+    if custom.kv_substrings.is_empty()
+        && custom.prompt_substrings.is_empty()
+        && custom.generation_any_of.is_empty()
+        && custom.generation_required.is_empty()
+    {
+        return PrometheusMetricHints::default();
+    }
+    let defaults = PrometheusMetricHints::default();
+    PrometheusMetricHints {
+        kv_substrings: if custom.kv_substrings.len() >= 2 {
+            custom.kv_substrings.clone()
+        } else {
+            defaults.kv_substrings.clone()
+        },
+        prompt_substrings: if custom.prompt_substrings.len() >= 3 {
+            custom.prompt_substrings.clone()
+        } else {
+            defaults.prompt_substrings.clone()
+        },
+        generation_any_of: if !custom.generation_any_of.is_empty() {
+            custom.generation_any_of.clone()
+        } else {
+            defaults.generation_any_of.clone()
+        },
+        generation_required: if custom.generation_required.len() >= 2 {
+            custom.generation_required.clone()
+        } else {
+            defaults.generation_required.clone()
+        },
+    }
 }
 
 pub fn validate_launch_config(config: &LaunchConfig) -> ValidationResult {
@@ -324,5 +377,37 @@ impl Visitor<'_> for GpuLayerSettingVisitor {
         u16::try_from(value)
             .map(GpuLayerSetting::Fixed)
             .map_err(|_| E::invalid_value(Unexpected::Signed(value), &self))
+    }
+}
+
+#[cfg(test)]
+mod prometheus_hints_merge_tests {
+    use super::{prometheus_metric_hints_from_config, PrometheusHintsConfig};
+    use crate::monitor::parse_prometheus_metrics_with_hints;
+
+    #[test]
+    fn custom_kv_substrings_override_defaults() {
+        let custom = PrometheusHintsConfig {
+            kv_substrings: vec!["mykv".into(), "pct".into()],
+            ..PrometheusHintsConfig::default()
+        };
+        let hints = prometheus_metric_hints_from_config(&custom);
+        let body = "MYKV_USAGE_PCT 0.4\n";
+        let m = parse_prometheus_metrics_with_hints(body, &hints);
+        assert!((m.kv_cache_usage_ratio.unwrap() - 0.4).abs() < 0.001);
+    }
+
+    #[test]
+    fn partial_kv_falls_back_to_defaults_for_that_dimension() {
+        let custom = PrometheusHintsConfig {
+            kv_substrings: vec!["only_one".into()],
+            generation_any_of: vec!["predicted".into()],
+            ..PrometheusHintsConfig::default()
+        };
+        let hints = prometheus_metric_hints_from_config(&custom);
+        let body = "llamacpp_kv_cache_usage_ratio 0.2\nllamacpp_predicted_tokens_seconds 9\n";
+        let m = parse_prometheus_metrics_with_hints(body, &hints);
+        assert!((m.kv_cache_usage_ratio.unwrap() - 0.2).abs() < 0.001);
+        assert!((m.tokens_per_second.unwrap() - 9.0).abs() < 0.001);
     }
 }
