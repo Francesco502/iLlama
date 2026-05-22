@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.0.0 - 2026-05-15
+
+### Changed
+
+- Reposition iLlama as a launcher-first local GGUF control center instead of a full chat workspace.
+- Replace the primary `配置 / 对话` navigation with `运行 / 连接 / 测试`.
+- Add an OpenAI-compatible connection panel with Base URL, API key, model name, JSON copy, and external client profiles for Chatbox, Cherry Studio, Open WebUI, AnythingLLM, and custom clients.
+- Add connection checking for `/health` and `/v1/models`, plus browser-preview warnings in the connection page.
+- Add an explicit V2 legacy history export command and connection-page action for users migrating old data.
+- Replace the old low-memory/balanced/performance parameter presets with `最大能力 / 自定义`.
+- Add automatic max-capability derivation from GGUF context metadata and sliders for custom context/output length.
+- Replace the full in-app conversation workspace with a transient smoke-test chat that does not save history.
+- Stop writing V3 settings that imply persistent chat history is enabled by default.
+- Optimize macOS window close behavior: clicking the close (X) button now hides the window to the background (retaining it in the Dock) instead of exiting.
+- Support reopening and refocusing the main window when clicking the Dock icon.
+- Guarantee clean termination of background `llama-server` processes when fully quitting the application (via Cmd+Q or Dock quit).
+- Update connection settings copy to explicitly clarify the "macOS system status bar (wifi, battery indicators area)" toggle, preventing layout ambiguity.
+
+
+### Removed
+
+- Remove the full chat workspace from the main product path: conversation history, branching, archive/pin/search, exports, assistant modes, writing actions, conversation memory, and automatic chat compression are no longer first-class V3 UI features.
+- Remove active chat-history Tauri commands and TypeScript V2 workspace modules from the main build. Legacy chat history files are not deleted.
+
 ## v2.1.2 - 2026-05-13
 
 ### Fixed

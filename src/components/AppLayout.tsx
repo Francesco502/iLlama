@@ -1,14 +1,25 @@
-import { Settings2, MessageCircle, ChevronDown, HelpCircle, Square } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { ChevronDown, FlaskConical, HelpCircle, Link2, Settings2, Square } from "lucide-react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { LogEntry, RuntimeMetrics, RuntimeStatus } from "../types/domain";
 import { formatBytes } from "../lib/format";
 
+export type AppTab = "run" | "connect" | "test";
+
 interface AppLayoutProps {
-  activeTab: "config" | "chat";
-  onTabChange: (tab: "config" | "chat") => void;
+  activeTab: AppTab;
+  onTabChange: (tab: AppTab) => void;
   sidebar: ReactNode;
-  configContent: ReactNode;
-  chatContent: ReactNode;
+  runContent: ReactNode;
+  connectionContent: ReactNode;
+  testContent: ReactNode;
   logs: LogEntry[];
   runtimeStatus: RuntimeStatus;
   runtimeMetrics: RuntimeMetrics;
@@ -26,12 +37,22 @@ const statusLabel: Record<RuntimeStatus, string> = {
   stopped: "已停止",
 };
 
+const DEFAULT_LOG_DRAWER_HEIGHT = 180;
+const MIN_LOG_DRAWER_HEIGHT = 96;
+const MAX_LOG_DRAWER_HEIGHT = 480;
+const LOG_DRAWER_KEYBOARD_STEP = 24;
+
+function clampLogDrawerHeight(height: number): number {
+  return Math.min(MAX_LOG_DRAWER_HEIGHT, Math.max(MIN_LOG_DRAWER_HEIGHT, Math.round(height)));
+}
+
 export function AppLayout({
   activeTab,
   onTabChange,
   sidebar,
-  configContent,
-  chatContent,
+  runContent,
+  connectionContent,
+  testContent,
   logs,
   runtimeStatus,
   runtimeMetrics,
@@ -39,11 +60,68 @@ export function AppLayout({
   onClearLogs,
 }: AppLayoutProps) {
   const [logOpen, setLogOpen] = useState(false);
+  const [logHeight, setLogHeight] = useState(DEFAULT_LOG_DRAWER_HEIGHT);
   const [logFilter, setLogFilter] = useState<"all" | "stdout" | "stderr" | "system">("all");
   const [logQuery, setLogQuery] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const logResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const canStop = runtimeStatus === "starting" || runtimeStatus === "healthy";
+
+  const stopLogResize = useCallback(() => {
+    logResizeRef.current = null;
+    document.body.removeAttribute("data-log-resizing");
+  }, []);
+
+  const handleLogResizeMove = useCallback((event: MouseEvent) => {
+    const resizeState = logResizeRef.current;
+    if (!resizeState) {
+      return;
+    }
+    setLogHeight(clampLogDrawerHeight(resizeState.startHeight + resizeState.startY - event.clientY));
+  }, []);
+
+  const handleLogResizeEnd = useCallback(() => {
+    stopLogResize();
+    window.removeEventListener("mousemove", handleLogResizeMove);
+    window.removeEventListener("mouseup", handleLogResizeEnd);
+  }, [handleLogResizeMove, stopLogResize]);
+
+  const handleLogResizeStart = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      logResizeRef.current = {
+        startY: event.clientY,
+        startHeight: logHeight,
+      };
+      document.body.setAttribute("data-log-resizing", "true");
+      window.addEventListener("mousemove", handleLogResizeMove);
+      window.addEventListener("mouseup", handleLogResizeEnd);
+    },
+    [handleLogResizeEnd, handleLogResizeMove, logHeight],
+  );
+
+  function handleLogResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setLogHeight((height) => clampLogDrawerHeight(height + LOG_DRAWER_KEYBOARD_STEP));
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setLogHeight((height) => clampLogDrawerHeight(height - LOG_DRAWER_KEYBOARD_STEP));
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      setLogHeight(MIN_LOG_DRAWER_HEIGHT);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      setLogHeight(MAX_LOG_DRAWER_HEIGHT);
+    }
+  }
 
   // #3: Auto-scroll log drawer to bottom
   useEffect(() => {
@@ -51,6 +129,14 @@ export function AppLayout({
       logEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [logs, logOpen]);
+
+  useEffect(() => {
+    return () => {
+      window.removeEventListener("mousemove", handleLogResizeMove);
+      window.removeEventListener("mouseup", handleLogResizeEnd);
+      stopLogResize();
+    };
+  }, [handleLogResizeEnd, handleLogResizeMove, stopLogResize]);
 
   // Keyboard shortcut: Esc closes log panel / shortcuts modal
   useEffect(() => {
@@ -82,66 +168,98 @@ export function AppLayout({
             <button
               className="tab-button"
               type="button"
-              data-active={activeTab === "config"}
-              onClick={() => onTabChange("config")}
+              data-active={activeTab === "run"}
+              onClick={() => onTabChange("run")}
             >
               <Settings2 size={14} />
-              配置
+              运行
             </button>
             <button
               className="tab-button"
               type="button"
-              data-active={activeTab === "chat"}
-              onClick={() => onTabChange("chat")}
+              data-active={activeTab === "connect"}
+              onClick={() => onTabChange("connect")}
             >
-              <MessageCircle size={14} />
-              对话
+              <Link2 size={14} />
+              连接
+            </button>
+            <button
+              className="tab-button"
+              type="button"
+              data-active={activeTab === "test"}
+              onClick={() => onTabChange("test")}
+            >
+              <FlaskConical size={14} />
+              测试
             </button>
           </div>
           <div className="tab-panel">
-            {activeTab === "config" ? configContent : chatContent}
+            {activeTab === "run" && runContent}
+            {activeTab === "connect" && connectionContent}
+            {activeTab === "test" && testContent}
           </div>
         </div>
       </div>
 
       {/* Log Drawer */}
-      <div className="log-drawer" data-open={logOpen}>
+      <div
+        className="log-drawer"
+        data-open={logOpen}
+        role="region"
+        aria-label="日志面板"
+        aria-hidden={!logOpen}
+        style={logOpen ? { height: `${logHeight}px` } : undefined}
+      >
         {logOpen && (
-          <div className="log-drawer-toolbar">
-            <div className="log-filter-group" role="tablist" aria-label="日志过滤">
-              {(["all", "stdout", "stderr", "system"] as const).map((kind) => (
-                <button
-                  key={kind}
-                  type="button"
-                  role="tab"
-                  aria-selected={logFilter === kind}
-                  data-active={logFilter === kind}
-                  onClick={() => setLogFilter(kind)}
-                >
-                  {kind === "all" ? "全部" : kind}
-                </button>
-              ))}
-            </div>
-            <input
-              className="log-search"
-              type="text"
-              placeholder="搜索日志"
-              aria-label="搜索日志"
-              value={logQuery}
-              onChange={(event) => setLogQuery(event.target.value)}
+          <>
+            <div
+              className="log-resize-handle"
+              role="separator"
+              aria-label="调整日志面板高度"
+              aria-orientation="horizontal"
+              aria-valuemin={MIN_LOG_DRAWER_HEIGHT}
+              aria-valuemax={MAX_LOG_DRAWER_HEIGHT}
+              aria-valuenow={logHeight}
+              tabIndex={0}
+              onMouseDown={handleLogResizeStart}
+              onKeyDown={handleLogResizeKeyDown}
             />
-            {onClearLogs && (
-              <button
-                className="log-clear-btn"
-                type="button"
-                aria-label="清空日志"
-                onClick={onClearLogs}
-                disabled={logs.length === 0}
-              >
-                清空
-              </button>
-            )}
-          </div>
+            <div className="log-drawer-toolbar">
+              <div className="log-filter-group" role="tablist" aria-label="日志过滤">
+                {(["all", "stdout", "stderr", "system"] as const).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    role="tab"
+                    aria-selected={logFilter === kind}
+                    data-active={logFilter === kind}
+                    onClick={() => setLogFilter(kind)}
+                  >
+                    {kind === "all" ? "全部" : kind}
+                  </button>
+                ))}
+              </div>
+              <input
+                className="log-search"
+                type="text"
+                placeholder="搜索日志"
+                aria-label="搜索日志"
+                value={logQuery}
+                onChange={(event) => setLogQuery(event.target.value)}
+              />
+              {onClearLogs && (
+                <button
+                  type="button"
+                  className="log-clear-btn"
+                  aria-label="清空日志"
+                  onClick={onClearLogs}
+                  disabled={logs.length === 0}
+                >
+                  清空
+                </button>
+              )}
+            </div>
+          </>
         )}
         <div className="log-drawer-inner">
           {logs
@@ -242,17 +360,9 @@ export function AppLayout({
               </button>
             </div>
             <dl className="shortcuts-grid">
-              <dt>聚焦搜索框</dt>
+              <dt>刷新模型列表</dt>
               <dd>
-                <kbd>⌘/Ctrl</kbd> + <kbd>K</kbd>
-              </dd>
-              <dt>新建对话</dt>
-              <dd>
-                <kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>
-              </dd>
-              <dt>发送消息</dt>
-              <dd>
-                <kbd>⌘/Ctrl</kbd> + <kbd>Enter</kbd>
+                <kbd>⌘/Ctrl</kbd> + <kbd>R</kbd>
               </dd>
               <dt>取消生成 / 关闭面板</dt>
               <dd>

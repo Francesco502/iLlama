@@ -1,6 +1,6 @@
 import { ClipboardPaste, FileText, ImagePlus, SendHorizontal, Square, X } from "lucide-react";
 import { ChangeEvent, DragEvent, KeyboardEvent, ClipboardEvent, useEffect, useRef, useState } from "react";
-import type { ChatAttachment, ChatAttachmentPersistence, PendingChatMessage } from "../../types/chat";
+import type { ChatAttachment, ChatAttachmentPersistence, PendingChatMessage } from "../types/chat";
 
 const MAX_ATTACHMENTS = 4;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -9,7 +9,7 @@ const THUMBNAIL_SIZE = 128;
 const COMPOSER_MIN_HEIGHT = 44;
 const COMPOSER_MAX_HEIGHT = 180;
 
-interface ChatComposerProps {
+interface SmokeChatComposerProps {
   disabled: boolean;
   disabledReason?: "runtime" | "conversation" | "streaming";
   streaming: boolean;
@@ -20,7 +20,7 @@ interface ChatComposerProps {
   onCancel: () => void;
 }
 
-export function ChatComposer({
+export function SmokeChatComposer({
   disabled,
   disabledReason,
   streaming,
@@ -29,7 +29,7 @@ export function ChatComposer({
   onDraftTextChange,
   onSend,
   onCancel,
-}: ChatComposerProps) {
+}: SmokeChatComposerProps) {
   const [uncontrolledDraft, setUncontrolledDraft] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);

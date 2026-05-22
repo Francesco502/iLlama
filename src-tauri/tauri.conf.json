@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "iLlama",
-  "version": "2.1.2",
+  "version": "3.0.0",
   "identifier": "com.illama.mac",
   "build": {
     "beforeDevCommand": "npm run dev",

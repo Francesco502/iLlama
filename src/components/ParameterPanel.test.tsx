@@ -10,7 +10,7 @@ import { emptyPrometheusHintsConfig } from "../types/domain";
 describe("ParameterPanel", () => {
   it("emits updated context size values", async () => {
     const user = userEvent.setup();
-    const profile = getProfileById("balanced");
+    const profile = getProfileById("custom");
     const onParametersChange = vi.fn();
     const onPrometheusHintsChange = vi.fn();
 
@@ -21,6 +21,7 @@ describe("ParameterPanel", () => {
         <ParameterPanel
           profile={profile}
           parameters={parameters}
+          modelContextLength={32768}
           port={8080}
           onPortChange={vi.fn()}
           prometheusHints={hints}
@@ -39,6 +40,10 @@ describe("ParameterPanel", () => {
 
     render(<Host />);
 
+    expect(screen.getByRole("button", { name: "最大能力" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "自定义" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "低内存" })).not.toBeInTheDocument();
+
     const ctxInput = screen.getByLabelText("上下文长度");
     await user.clear(ctxInput);
     await user.type(ctxInput, "16384");
@@ -47,5 +52,27 @@ describe("ParameterPanel", () => {
       ...profile.parameters,
       ctxSize: 16384,
     });
+  });
+
+  it("shows maximum capability as an automatic read-only context mode", () => {
+    const profile = getProfileById("max-capability");
+
+    render(
+      <ParameterPanel
+        profile={profile}
+        parameters={{ ...profile.parameters, ctxSize: 32768 }}
+        modelContextLength={32768}
+        port={8080}
+        onPortChange={vi.fn()}
+        prometheusHints={emptyPrometheusHintsConfig()}
+        onPrometheusHintsChange={vi.fn()}
+        onParametersChange={vi.fn()}
+        onProfileChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("已按模型能力自动拉满上下文")).toBeInTheDocument();
+    expect(screen.getByText("32,768")).toBeInTheDocument();
+    expect(screen.queryByLabelText("上下文长度")).not.toBeInTheDocument();
   });
 });

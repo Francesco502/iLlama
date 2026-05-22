@@ -13,10 +13,10 @@ fn creates_default_settings_when_file_is_missing() {
 
     assert_eq!(settings.schema_version, 2);
     assert!(settings.model_directories.is_empty());
-    assert_eq!(settings.default_preset_id, "balanced");
+    assert_eq!(settings.default_preset_id, "max-capability");
     assert_eq!(settings.default_port, 8080);
-    assert!(settings.chat_history.enabled);
-    assert_eq!(settings.chat_history.image_persistence, "thumbnail");
+    assert!(!settings.chat_history.enabled);
+    assert_eq!(settings.chat_history.image_persistence, "none");
 }
 
 #[test]
@@ -46,6 +46,30 @@ fn migrates_v1_chat_history_setting_to_v2() {
     assert_eq!(loaded.chat_history.image_persistence, "none");
     assert!(!loaded.chat_history.include_reasoning_in_export_default);
     assert_eq!(loaded.chat_history.max_conversations, 200);
+}
+
+#[test]
+fn migrates_old_parameter_presets_to_custom_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    fs::write(
+        &path,
+        r#"{
+          "schemaVersion": 2,
+          "modelDirectories": [],
+          "llamaServerPath": null,
+          "defaultPresetId": "performance",
+          "lastSelectedModelPath": null,
+          "autoPort": true,
+          "defaultPort": 8080,
+          "idleSleepSeconds": 0
+        }"#,
+    )
+    .unwrap();
+
+    let loaded = load_settings_from(&path).unwrap();
+
+    assert_eq!(loaded.default_preset_id, "custom");
 }
 
 #[test]

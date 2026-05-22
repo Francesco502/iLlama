@@ -9,13 +9,6 @@ import type {
   ValidationResult,
 } from "../types/domain";
 
-export interface ChatHistorySettings {
-  enabled: boolean;
-  imagePersistence: "none" | "thumbnail" | "full";
-  includeReasoningInExportDefault: boolean;
-  maxConversations: number;
-}
-
 export interface AppSettings {
   schemaVersion: number;
   modelDirectories: string[];
@@ -25,9 +18,8 @@ export interface AppSettings {
   autoPort: boolean;
   defaultPort: number;
   idleSleepSeconds: number;
-  saveChatHistory?: boolean;
-  chatHistory: ChatHistorySettings;
   prometheusHints?: PrometheusHintsConfig;
+  showInMenuBar?: boolean;
 }
 
 export interface RuntimeSnapshot {
@@ -95,4 +87,12 @@ export async function checkHealth(host: string, port: number): Promise<HealthSta
 
 export async function findAvailablePort(host: string, preferred: number): Promise<number> {
   return invoke<number>("find_available_port_command", { host, preferred });
+}
+
+export async function setTrayEnabled(enabled: boolean): Promise<void> {
+  await invoke("set_tray_enabled_command", { enabled });
+}
+
+export async function getTrayEnabled(): Promise<boolean> {
+  return invoke<boolean>("get_tray_enabled_command");
 }

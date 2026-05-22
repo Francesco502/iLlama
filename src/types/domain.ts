@@ -78,7 +78,7 @@ export interface SamplingParameters {
 }
 
 export interface ParameterProfile {
-  id: "low-memory" | "balanced" | "performance" | "custom";
+  id: "max-capability" | "custom";
   name: string;
   description: string;
   parameters: StartupParameters;

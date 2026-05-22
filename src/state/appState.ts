@@ -1,4 +1,4 @@
-import type { AppSettings, ChatHistorySettings } from "../api/tauri";
+import type { AppSettings } from "../api/tauri";
 import type {
   ModelDirectory,
   ModelEntry,
@@ -7,13 +7,6 @@ import type {
   StartupParameters,
 } from "../types/domain";
 
-export const defaultChatHistorySettings: ChatHistorySettings = {
-  enabled: true,
-  imagePersistence: "thumbnail",
-  includeReasoningInExportDefault: false,
-  maxConversations: 200,
-};
-
 interface SettingsSnapshotInput {
   directories: ModelDirectory[];
   binaryPath: string | null;
@@ -21,7 +14,6 @@ interface SettingsSnapshotInput {
   selectedModelPath: string | null;
   port: number;
   startupParameters: StartupParameters;
-  chatHistory?: ChatHistorySettings;
   prometheusHints: PrometheusHintsConfig;
 }
 
@@ -54,7 +46,6 @@ export function buildSettingsSnapshot({
   selectedModelPath,
   port,
   startupParameters,
-  chatHistory = defaultChatHistorySettings,
   prometheusHints,
 }: SettingsSnapshotInput): AppSettings {
   return {
@@ -68,7 +59,6 @@ export function buildSettingsSnapshot({
     autoPort: true,
     defaultPort: port,
     idleSleepSeconds: startupParameters.idleSleepSeconds,
-    chatHistory,
     prometheusHints,
   };
 }

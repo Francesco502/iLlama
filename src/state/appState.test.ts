@@ -57,7 +57,7 @@ describe("app state helpers", () => {
       { path: "/models/b", status: "missing" },
     ];
     const parameters = {
-      ...getProfileById("balanced").parameters,
+      ...getProfileById("custom").parameters,
       batchSize: 2048,
       metrics: false,
       idleSleepSeconds: 30,
@@ -66,7 +66,7 @@ describe("app state helpers", () => {
     const snapshot = buildSettingsSnapshot({
       directories,
       binaryPath: "/bin/llama-server",
-      profileId: "balanced",
+      profileId: "custom",
       selectedModelPath: "/models/a/model-a.gguf",
       port: 9090,
       startupParameters: parameters,
@@ -79,12 +79,6 @@ describe("app state helpers", () => {
       llamaServerPath: "/bin/llama-server",
       defaultPort: 9090,
       idleSleepSeconds: 30,
-      chatHistory: {
-        enabled: true,
-        imagePersistence: "thumbnail",
-        includeReasoningInExportDefault: false,
-        maxConversations: 200,
-      },
     });
   });
 });

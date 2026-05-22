@@ -1,10 +1,11 @@
-import { FileSearch, Settings2 } from "lucide-react";
-import { builtInProfiles } from "../lib/parameterSchema";
+import { FileSearch, Settings2, HelpCircle } from "lucide-react";
+import { builtInProfiles, resolveModelContextLimit } from "../lib/parameterSchema";
 import type { ParameterProfile, PrometheusHintsConfig, StartupParameters, ValidationResult } from "../types/domain";
 
 interface ParameterPanelProps {
   profile: ParameterProfile;
   parameters: StartupParameters;
+  modelContextLength?: number | null;
   port: number;
   onPortChange: (port: number) => void;
   mmprojCandidates?: string[];
@@ -17,7 +18,7 @@ interface ParameterPanelProps {
 }
 
 export function ParameterPanel({
-  profile, parameters, port, onPortChange,
+  profile, parameters, modelContextLength, port, onPortChange,
   mmprojCandidates = [], onSelectMmproj,
   validation,
   prometheusHints,
@@ -27,6 +28,8 @@ export function ParameterPanel({
   function update<K extends keyof StartupParameters>(key: K, value: StartupParameters[K]) {
     onParametersChange({ ...parameters, [key]: value });
   }
+  const modelContextLimit = resolveModelContextLimit(modelContextLength);
+  const customMode = profile.id === "custom";
 
   return (
     <section className="panel">
@@ -41,22 +44,80 @@ export function ParameterPanel({
           </button>
         ))}
       </div>
+      <div className="parameter-mode-note">
+        <strong>{profile.name}</strong>
+        <span>{profile.description}</span>
+      </div>
+      {customMode ? (
+        <ContextLengthControl
+          max={modelContextLimit}
+          value={parameters.ctxSize}
+          onChange={(value) => update("ctxSize", value)}
+        />
+      ) : (
+        <div className="auto-capability-summary" aria-label="最大能力上下文">
+          <div>
+            <span>上下文长度</span>
+            <strong>{parameters.ctxSize.toLocaleString("zh-CN")}</strong>
+          </div>
+          <p>已按模型能力自动拉满上下文</p>
+          <small>
+            模型声明上限：{modelContextLength ? modelContextLength.toLocaleString("zh-CN") : "未知，使用安全默认值"}
+          </small>
+        </div>
+      )}
       <div className="form-grid">
-        <NumberField label="上下文长度" value={parameters.ctxSize} onChange={(v) => update("ctxSize", v)} />
-        <TextField label="CPU 线程" value={String(parameters.threads)} onChange={(v) => update("threads", parseAutoNumber(v))} />
-        <TextField label="GPU 层数" value={String(parameters.gpuLayers)} onChange={(v) => update("gpuLayers", parseGpuLayers(v))} />
-        <NumberField label="Batch size" value={parameters.batchSize} onChange={(v) => update("batchSize", v)} />
-        <NumberField label="Micro-batch" value={parameters.ubatchSize} onChange={(v) => update("ubatchSize", v)} />
-        <SelectField label="Flash Attention" value={parameters.flashAttention} options={[
-          { value: "auto", label: "自动" },
-          { value: "on", label: "开启" },
-          { value: "off", label: "关闭" },
-        ]} onChange={(v) => update("flashAttention", v as StartupParameters["flashAttention"])} />
-        <NumberField label="端口号" value={port} onChange={onPortChange} />
+        <TextField
+          label="CPU 线程"
+          value={String(parameters.threads)}
+          onChange={(v) => update("threads", parseAutoNumber(v))}
+          tooltip="指定运行模型所使用的 CPU 线程数。'auto' 表示自动决定最佳线程数。"
+          presets={[{ label: "自动", value: "auto" }]}
+        />
+        <TextField
+          label="GPU 层数"
+          value={String(parameters.gpuLayers)}
+          onChange={(v) => update("gpuLayers", parseGpuLayers(v))}
+          tooltip="卸载到 GPU 显存中的模型层数。设置为 'all' 将尽量全部卸载，'auto' 为自动。"
+          presets={[
+            { label: "自动", value: "auto" },
+            { label: "全部", value: "all" },
+          ]}
+        />
         <NumberField
-          label="空闲休眠（秒，0 表示禁用）"
+          label="Batch size"
+          value={parameters.batchSize}
+          onChange={(v) => update("batchSize", v)}
+          tooltip="单次评估的批大小（Batch Size），用于控制 Prompt 处理吞吐量。"
+        />
+        <NumberField
+          label="Micro-batch"
+          value={parameters.ubatchSize}
+          onChange={(v) => update("ubatchSize", v)}
+          tooltip="微批次大小，用于控制指令流的微批大小，通常与 Batch size 相同。"
+        />
+        <SelectField
+          label="Flash Attention"
+          value={parameters.flashAttention}
+          options={[
+            { value: "auto", label: "自动" },
+            { value: "on", label: "开启" },
+            { value: "off", label: "关闭" },
+          ]}
+          onChange={(v) => update("flashAttention", v as StartupParameters["flashAttention"])}
+          tooltip="使用闪光注意力机制（Flash Attention），能有效降低显存并加速推理。"
+        />
+        <NumberField
+          label="端口号"
+          value={port}
+          onChange={onPortChange}
+          tooltip="llama-server 本地 API 监听的 TCP 端口号。"
+        />
+        <NumberField
+          label="空闲休眠（秒）"
           value={parameters.idleSleepSeconds}
           onChange={(v) => update("idleSleepSeconds", Math.max(0, v))}
+          tooltip="llama-server 空闲多少秒后自动进入休眠状态，以释放 CPU/GPU 资源（0 表示禁用）。"
         />
       </div>
 
@@ -99,9 +160,25 @@ export function ParameterPanel({
       </div>
 
       <div className="toggle-list">
-        <ToggleRow label="内存映射 mmap" enabled={parameters.mmap} onToggle={() => update("mmap", !parameters.mmap)} />
-        <ToggleRow label="Metrics 监控" enabled={parameters.metrics} onToggle={() => update("metrics", !parameters.metrics)} />
-        <ToggleRow label="mlock 锁定内存" enabled={parameters.mlock} warning onToggle={() => update("mlock", !parameters.mlock)} />
+        <ToggleRow
+          label="内存映射 mmap"
+          enabled={parameters.mmap}
+          onToggle={() => update("mmap", !parameters.mmap)}
+          tooltip="允许模型文件通过内存映射 (mmap) 异步加载，缩短启动时间并允许多进程共享。"
+        />
+        <ToggleRow
+          label="Metrics 监控"
+          enabled={parameters.metrics}
+          onToggle={() => update("metrics", !parameters.metrics)}
+          tooltip="启用 Prometheus 指标监控接口，方便外接监控仪表盘查看性能。"
+        />
+        <ToggleRow
+          label="mlock 锁定内存"
+          enabled={parameters.mlock}
+          warning
+          onToggle={() => update("mlock", !parameters.mlock)}
+          tooltip="强制将模型数据锁定在物理内存中，防止其被交换到 Swap 分区，可保证推理延迟稳定，但需要物理内存充足。"
+        />
       </div>
 
       <details className="prometheus-hints-details">
@@ -133,6 +210,60 @@ export function ParameterPanel({
         </div>
       </details>
     </section>
+  );
+}
+
+function FieldLabel({ label, tooltip }: { label: string; tooltip?: string }) {
+  if (!tooltip) {
+    return <span>{label}</span>;
+  }
+  return (
+    <span className="field-label-container">
+      <span>{label}</span>
+      <span className="tooltip-wrapper" data-tooltip={tooltip} onClick={(e) => e.stopPropagation()}>
+        <HelpCircle size={12} className="tooltip-icon" />
+      </span>
+    </span>
+  );
+}
+
+function ContextLengthControl({
+  value,
+  max,
+  onChange,
+}: {
+  value: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  const safeMax = Math.max(1024, max);
+  const safeValue = Math.min(safeMax, Math.max(1024, value));
+  return (
+    <div className="range-control">
+      <div className="range-control-header">
+        <label htmlFor="ctx-size-number">上下文长度</label>
+        <span>{safeValue.toLocaleString("zh-CN")} / {safeMax.toLocaleString("zh-CN")}</span>
+      </div>
+      <input
+        aria-label="上下文长度滑杆"
+        max={safeMax}
+        min={1024}
+        onChange={(event) => onChange(Number.parseInt(event.target.value || "0", 10))}
+        step={1024}
+        type="range"
+        value={safeValue}
+      />
+      <input
+        id="ctx-size-number"
+        inputMode="numeric"
+        max={safeMax}
+        min={1024}
+        onChange={(event) => onChange(Number.parseInt(event.target.value || "0", 10))}
+        step={1024}
+        type="number"
+        value={Number.isFinite(value) ? value : 0}
+      />
+    </div>
   );
 }
 
@@ -169,28 +300,79 @@ function listFromCsv(raw: string): string[] {
     .filter(Boolean);
 }
 
-function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+function NumberField({
+  label,
+  value,
+  onChange,
+  tooltip,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  tooltip?: string;
+}) {
   return (
     <label className="field">
-      <span>{label}</span>
+      <FieldLabel label={label} tooltip={tooltip} />
       <input inputMode="numeric" min={0} onChange={(e) => onChange(Number.parseInt(e.target.value || "0", 10))} type="number" value={value} />
     </label>
   );
 }
 
-function TextField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function TextField({
+  label,
+  value,
+  onChange,
+  tooltip,
+  presets,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  tooltip?: string;
+  presets?: { label: string; value: string }[];
+}) {
   return (
     <label className="field">
-      <span>{label}</span>
-      <input onChange={(e) => onChange(e.target.value)} value={value} />
+      <FieldLabel label={label} tooltip={tooltip} />
+      <div className="input-with-presets">
+        <input onChange={(e) => onChange(e.target.value)} value={value} />
+        {presets && presets.length > 0 && (
+          <div className="preset-badges">
+            {presets.map((preset) => (
+              <button
+                key={preset.value}
+                type="button"
+                className="preset-badge"
+                onClick={() => onChange(preset.value)}
+                data-active={value === preset.value}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </label>
   );
 }
 
-function SelectField({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+  tooltip,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+  tooltip?: string;
+}) {
   return (
     <label className="field">
-      <span>{label}</span>
+      <FieldLabel label={label} tooltip={tooltip} />
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
       </select>
@@ -198,10 +380,22 @@ function SelectField({ label, value, options, onChange }: { label: string; value
   );
 }
 
-function ToggleRow({ label, enabled, warning, onToggle }: { label: string; enabled: boolean; warning?: boolean; onToggle?: () => void }) {
+function ToggleRow({
+  label,
+  enabled,
+  warning,
+  onToggle,
+  tooltip,
+}: {
+  label: string;
+  enabled: boolean;
+  warning?: boolean;
+  onToggle?: () => void;
+  tooltip?: string;
+}) {
   return (
     <button className="toggle-row" data-warning={warning} type="button" onClick={onToggle}>
-      <span>{label}</span>
+      <FieldLabel label={label} tooltip={tooltip} />
       <span className="toggle" data-enabled={enabled}><span /></span>
     </button>
   );
@@ -223,3 +417,4 @@ function parseGpuLayers(value: string): StartupParameters["gpuLayers"] {
 function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
+

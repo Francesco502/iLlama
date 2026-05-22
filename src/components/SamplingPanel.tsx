@@ -1,37 +1,31 @@
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
-import { clampInt, getAdaptiveSafetyFactor } from "../lib/contextBudget";
-import type { SamplingParameters } from "../types/domain";
+import { getAdaptiveSafetyFactor } from "../lib/contextBudget";
+import { calculateMaxOutputTokens } from "../lib/parameterSchema";
+import type { ParameterProfile, SamplingParameters } from "../types/domain";
 
 interface SamplingPanelProps {
+  parameterMode: ParameterProfile["id"];
   sampling: SamplingParameters;
   ctxSize: number;
   onSamplingChange: (sampling: SamplingParameters) => void;
 }
 
-export function SamplingPanel({ sampling, ctxSize, onSamplingChange }: SamplingPanelProps) {
+export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChange }: SamplingPanelProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   function update<K extends keyof SamplingParameters>(key: K, value: SamplingParameters[K]) {
     onSamplingChange({ ...sampling, [key]: value });
   }
 
   const maxTokens = Math.max(0, sampling.maxTokens);
+  const outputUpperBound = calculateMaxOutputTokens(ctxSize);
+  const maximumMode = parameterMode === "max-capability";
   const promptBudget = Math.max(
     0,
     Math.floor((Math.max(0, ctxSize) - maxTokens) * getAdaptiveSafetyFactor(ctxSize)),
   );
   const budgetKind: "ok" | "warn" =
     promptBudget <= 0 || promptBudget < Math.floor(Math.max(0, ctxSize) * 0.2) ? "warn" : "ok";
-
-  function applyLongReplyPreset() {
-    const recommended = clampInt(Math.floor(Math.max(256, Math.min(2048, ctxSize * 0.4))), 64, 8192);
-    update("maxTokens", recommended);
-  }
-
-  function applyLongMemoryPreset() {
-    const recommended = clampInt(Math.floor(Math.max(128, Math.min(512, ctxSize * 0.15))), 32, 4096);
-    update("maxTokens", recommended);
-  }
 
   const stopJoined = sampling.stop.join("\n");
 
@@ -42,14 +36,22 @@ export function SamplingPanel({ sampling, ctxSize, onSamplingChange }: SamplingP
         <span>采样与输出</span>
       </div>
 
-      <div className="form-grid">
-        <NumberField
-          label="生成长度上限（maxTokens）"
+      <div className="sampling-output-layout">
+        <OutputLengthControl
+          disabled={maximumMode}
+          max={outputUpperBound}
           value={sampling.maxTokens}
           onChange={(v) => update("maxTokens", v)}
-          min={0}
-          step={1}
         />
+        {maximumMode && (
+          <div className="auto-capability-summary compact">
+            <p>输出已按当前上下文自动拉到安全上限</p>
+            <small>该值只影响内置测试聊天；外部客户端仍由客户端自己的 max_tokens 控制。</small>
+          </div>
+        )}
+      </div>
+
+      <div className="form-grid">
         <NumberField
           label="温度（temperature）"
           value={sampling.temperature}
@@ -65,15 +67,6 @@ export function SamplingPanel({ sampling, ctxSize, onSamplingChange }: SamplingP
           max={1}
           step={0.05}
         />
-      </div>
-
-      <div className="sampling-presets" aria-label="输出偏好预设">
-        <button className="ghost-button compact" type="button" onClick={applyLongReplyPreset}>
-          长回复
-        </button>
-        <button className="ghost-button compact" type="button" onClick={applyLongMemoryPreset}>
-          长记忆
-        </button>
       </div>
 
       <button
@@ -167,6 +160,50 @@ export function SamplingPanel({ sampling, ctxSize, onSamplingChange }: SamplingP
         )}
       </div>
     </section>
+  );
+}
+
+function OutputLengthControl({
+  value,
+  max,
+  disabled,
+  onChange,
+}: {
+  value: number;
+  max: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  const safeMax = Math.max(64, max);
+  const safeValue = Math.min(safeMax, Math.max(64, value));
+  return (
+    <div className="range-control">
+      <div className="range-control-header">
+        <label htmlFor="max-tokens-number">输出最大长度</label>
+        <span>{safeValue.toLocaleString("zh-CN")} / {safeMax.toLocaleString("zh-CN")}</span>
+      </div>
+      <input
+        aria-label="输出最大长度滑杆"
+        disabled={disabled}
+        max={safeMax}
+        min={64}
+        onChange={(event) => onChange(Number.parseInt(event.target.value || "0", 10))}
+        step={64}
+        type="range"
+        value={safeValue}
+      />
+      <input
+        disabled={disabled}
+        id="max-tokens-number"
+        inputMode="numeric"
+        max={safeMax}
+        min={64}
+        onChange={(event) => onChange(Number.parseInt(event.target.value || "0", 10))}
+        step={64}
+        type="number"
+        value={Number.isFinite(value) ? value : 0}
+      />
+    </div>
   );
 }
 

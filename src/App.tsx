@@ -1,34 +1,39 @@
-import { FileCog, Play, Cpu } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FileCog, Play, Cpu, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { computeContextLengthMismatch } from "./app/modelWorkspace";
-import { AppLayout } from "./components/AppLayout";
-import { ChatWorkspace } from "./components/chat/ChatWorkspace";
+import { AppLayout, type AppTab } from "./components/AppLayout";
 import { CommandPreview } from "./components/CommandPreview";
+import { ConnectionPanel } from "./components/ConnectionPanel";
 import { ModelDirectoryPicker } from "./components/ModelDirectoryPicker";
 import { ModelList } from "./components/ModelList";
 import { ParameterPanel } from "./components/ParameterPanel";
+import { RuntimeSmokeChat } from "./components/RuntimeSmokeChat";
 import { SamplingPanel } from "./components/SamplingPanel";
 import {
   isTauriRuntime,
   findAvailablePort,
   resolveLlamaServerPath,
-  type ChatHistorySettings,
+  getTrayEnabled,
+  setTrayEnabled,
 } from "./api/tauri";
-import { exportChatConversation } from "./api/chatHistory";
-import { buildCommandPreview, getProfileById, validateLaunchConfig } from "./lib/parameterSchema";
-import { demoModelDirectories, demoModels } from "./state/appStore";
+import { exportLegacyChatHistory } from "./api/legacyChatExport";
 import {
-  buildSettingsSnapshot,
-  defaultChatHistorySettings,
-} from "./state/appState";
+  buildCommandPreview,
+  buildMaxCapabilitySampling,
+  buildMaxCapabilityStartupParameters,
+  getProfileById,
+  resolveModelContextLimit,
+  validateLaunchConfig,
+} from "./lib/parameterSchema";
+import { buildRuntimeConnection } from "./lib/externalClients";
+import { demoModelDirectories, demoModels } from "./state/appStore";
+import { buildSettingsSnapshot } from "./state/appState";
 import { useAppBootstrap } from "./hooks/useAppBootstrap";
 import { useDebouncedSettingsPersist } from "./hooks/useDebouncedSettingsPersist";
 import { useLlamaProcess } from "./hooks/useLlamaProcess";
 import { useModelDirectoryScanning } from "./hooks/useModelDirectoryScanning";
 import { useAppLogs } from "./hooks/useAppLogs";
-import { useChatGeneration } from "./hooks/useChatGeneration";
-import { useChatWorkspace } from "./hooks/useChatWorkspace";
 import {
   formatErrorBoundaryLog,
   subscribeToErrorBoundaryReports,
@@ -40,7 +45,6 @@ import {
   type ModelEntry,
   type ParameterProfile,
   type PrometheusHintsConfig,
-  type RuntimeMetrics,
 } from "./types/domain";
 
 const DEFAULT_PORT = 8080;
@@ -66,14 +70,13 @@ export function App() {
   );
   const [binaryPath, setBinaryPath] = useState<string | null>(null);
   const [port, setPort] = useState(DEFAULT_PORT);
-  const [profileId, setProfileId] = useState<ParameterProfile["id"]>("balanced");
-  const [startupParameters, setStartupParameters] = useState(getProfileById("balanced").parameters);
+  const [profileId, setProfileId] = useState<ParameterProfile["id"]>("max-capability");
+  const [startupParameters, setStartupParameters] = useState(getProfileById("max-capability").parameters);
   const [prometheusHints, setPrometheusHints] = useState<PrometheusHintsConfig>(emptyPrometheusHintsConfig);
-  const [activeTab, setActiveTab] = useState<"config" | "chat">("config");
+  const [activeTab, setActiveTab] = useState<AppTab>("run");
   const [modelSort, setModelSort] = useState<"name" | "size" | "date">("name");
-  const [chatHistory, setChatHistory] = useState<ChatHistorySettings>(
-    defaultChatHistorySettings,
-  );
+  const [modelSearch, setModelSearch] = useState("");
+  const [trayEnabled, setTrayEnabledState] = useState(false);
 
   const hasBootstrappedRef = useRef(!runningInTauri);
 
@@ -85,10 +88,6 @@ export function App() {
       ? computeContextLengthMismatch(selectedModel.contextLength, startupParameters.ctxSize)
       : null;
 
-  useEffect(() => {
-    setSampling(getProfileById(profileId).sampling);
-  }, [profileId]);
-
   // --- Custom hooks ---
   const {
     runtimeStatus,
@@ -99,84 +98,8 @@ export function App() {
   } = useLlamaProcess({
     appendSystemLog,
     mergeLogs,
-    onHealthy: () => setActiveTab("chat"),
+    onHealthy: () => setActiveTab("connect"),
   });
-
-  const {
-    conversations,
-    activeConversation,
-    searchHaystacks,
-    createConversation,
-    selectConversation,
-    saveConversation,
-    renameConversation,
-    setPinned,
-    setArchived,
-    deleteConversation,
-    deleteMessagePair,
-    clearHistory,
-    branchFromMessage,
-    loading: chatHistoryLoading,
-  } = useChatWorkspace({
-    historyEnabled: chatHistory.enabled,
-    imagePersistence: chatHistory.imagePersistence,
-    maxConversations: chatHistory.maxConversations,
-    modelPath: selectedModel?.path ?? null,
-    modelName: selectedModel?.fileName ?? null,
-  });
-
-  const {
-    streaming,
-    streamTokensPerSecond,
-    sendMessage,
-    cancelGeneration,
-    regenerateFromMessage,
-    editUserMessageAndResend,
-    continueFromAssistantMessage,
-    compressActiveConversation,
-  } = useChatGeneration({
-    port,
-    sampling,
-    contextSize: startupParameters.ctxSize,
-    modelPath: selectedModel?.path ?? null,
-    modelName: selectedModel?.fileName ?? null,
-    activeConversation,
-    saveConversation,
-    appendSystemLog,
-  });
-
-  const handleChatHistoryChange = useCallback((next: ChatHistorySettings) => {
-    setChatHistory(next);
-  }, []);
-
-  const handleClearHistory = useCallback(async () => {
-    try {
-      await clearHistory();
-      appendSystemLog("已清空本地对话历史。");
-    } catch (error) {
-      appendSystemLog(error instanceof Error ? error.message : String(error));
-    }
-  }, [appendSystemLog, clearHistory]);
-
-  const handleExportConversation = useCallback(
-    async (format: "markdown" | "json", includeReasoning: boolean, conversationId?: string) => {
-      const targetId = conversationId ?? activeConversation?.id;
-      if (!targetId) {
-        return;
-      }
-      if (!runningInTauri) {
-        appendSystemLog("浏览器预览模式下不能导出对话；请在 Tauri 应用中使用。");
-        return;
-      }
-      try {
-        const path = await exportChatConversation(targetId, format, includeReasoning);
-        appendSystemLog(`已导出对话：${path}`);
-      } catch (error) {
-        appendSystemLog(error instanceof Error ? error.message : String(error));
-      }
-    },
-    [activeConversation, appendSystemLog, runningInTauri],
-  );
 
   const commandPreview = useMemo(
     () =>
@@ -213,12 +136,10 @@ export function App() {
         selectedModelPath,
         port,
         startupParameters,
-        chatHistory,
         prometheusHints,
       }),
     [
       binaryPath,
-      chatHistory,
       directories,
       port,
       profileId,
@@ -247,7 +168,6 @@ export function App() {
     hasBootstrappedRef,
     setBinaryPath,
     setPort,
-    setChatHistory,
     setProfileId,
     setStartupParameters,
     setDirectories,
@@ -259,28 +179,52 @@ export function App() {
 
   useDebouncedSettingsPersist(runningInTauri, hasBootstrappedRef, settingsSnapshot, appendSystemLog);
 
-  const displayedRuntimeMetrics = useMemo<RuntimeMetrics>(
-    () => ({
-      ...runtimeMetrics,
-      tokensPerSecond: runtimeMetrics.tokensPerSecond ?? streamTokensPerSecond,
-    }),
-    [runtimeMetrics, streamTokensPerSecond],
-  );
+  // Read tray state from backend on startup
+  useEffect(() => {
+    if (!runningInTauri) return;
+    getTrayEnabled()
+      .then(setTrayEnabledState)
+      .catch(() => {/* ignore — tray API might not be available in dev */});
+  }, [runningInTauri]);
 
   const sortedModels = useMemo(() => {
-    const sorted = [...models];
+    let result = [...models];
+    if (modelSearch) {
+      const q = modelSearch.toLowerCase();
+      result = result.filter((m) => m.fileName.toLowerCase().includes(q));
+    }
     switch (modelSort) {
       case "size":
-        sorted.sort((a, b) => b.sizeBytes - a.sizeBytes);
+        result.sort((a, b) => b.sizeBytes - a.sizeBytes);
         break;
       case "date":
-        sorted.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+        result.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
         break;
       default:
-        sorted.sort((a, b) => a.fileName.localeCompare(b.fileName));
+        result.sort((a, b) => a.fileName.localeCompare(b.fileName));
     }
-    return sorted;
-  }, [models, modelSort]);
+    return result;
+  }, [models, modelSort, modelSearch]);
+
+  const runtimeConnection = useMemo(
+    () =>
+      buildRuntimeConnection({
+        port,
+        modelName: selectedModel?.fileName ?? null,
+        healthy: runtimeStatus === "healthy",
+      }),
+    [port, runtimeStatus, selectedModel?.fileName],
+  );
+
+  useEffect(() => {
+    if (profileId !== "max-capability") {
+      return;
+    }
+    setStartupParameters((current) => buildMaxCapabilityStartupParameters(selectedModel?.contextLength ?? null, current));
+    setSampling((current) => {
+      return buildMaxCapabilitySampling(resolveModelContextLimit(selectedModel?.contextLength ?? null), current);
+    });
+  }, [profileId, selectedModel?.contextLength]);
 
   useEffect(() => {
     return () => {
@@ -423,17 +367,27 @@ export function App() {
     });
   }
 
+  async function handleExportLegacyHistory() {
+    if (!runningInTauri) {
+      appendSystemLog("浏览器预览模式下不能导出 V2 历史；请在 Tauri 应用中使用。");
+      return;
+    }
+
+    try {
+      const exportPath = await exportLegacyChatHistory();
+      appendSystemLog(`已导出 V2 历史：${exportPath}`);
+    } catch (error) {
+      appendSystemLog(`导出 V2 历史失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="traffic-lights" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
         <div className="title-block">
           <Cpu size={16} />
           <h1>iLlama</h1>
+          <span className="version-badge">v3.0.0</span>
         </div>
         <div className="topbar-actions">
           <button className="ghost-button" type="button" onClick={handleSelectBinary}>
@@ -446,8 +400,12 @@ export function App() {
             disabled={runtimeStatus === "starting" || runtimeStatus === "healthy"}
             onClick={handleStart}
           >
-            <Play size={13} />
-            启动
+            {runtimeStatus === "starting" ? (
+              <Loader2 size={13} className="spin" />
+            ) : (
+              <Play size={13} />
+            )}
+            {runtimeStatus === "starting" ? "启动中..." : "启动"}
           </button>
         </div>
       </header>
@@ -470,10 +428,12 @@ export function App() {
               sort={modelSort}
               onSortChange={setModelSort}
               onSelect={handleSelectModel}
+              search={modelSearch}
+              onSearchChange={setModelSearch}
             />
           </>
         }
-        configContent={
+        runContent={
           <div className="config-view">
             <section className="model-summary panel">
               <div>
@@ -514,6 +474,7 @@ export function App() {
             <ParameterPanel
               profile={profile}
               parameters={startupParameters}
+              modelContextLength={selectedModel?.contextLength ?? null}
               port={port}
               onPortChange={setPort}
               mmprojCandidates={selectedModel?.mmprojCandidates ?? []}
@@ -524,59 +485,55 @@ export function App() {
               onParametersChange={setStartupParameters}
               onProfileChange={(id) => {
                 setProfileId(id);
-                const nextParameters = getProfileById(id).parameters;
-                setStartupParameters({
-                  ...nextParameters,
-                  mmprojPath: startupParameters.mmprojPath,
-                  mmprojOffload: startupParameters.mmprojOffload,
-                });
+                if (id === "max-capability") {
+                  const nextParameters = buildMaxCapabilityStartupParameters(
+                    selectedModel?.contextLength ?? null,
+                    startupParameters,
+                  );
+                  setStartupParameters(nextParameters);
+                  setSampling((current) => buildMaxCapabilitySampling(nextParameters.ctxSize, current));
+                }
               }}
             />
-            <SamplingPanel sampling={sampling} ctxSize={startupParameters.ctxSize} onSamplingChange={setSampling} />
+            <SamplingPanel
+              parameterMode={profileId}
+              sampling={sampling}
+              ctxSize={startupParameters.ctxSize}
+              onSamplingChange={setSampling}
+            />
             <CommandPreview args={commandPreview} />
           </div>
         }
-        chatContent={
-          <ChatWorkspace
+        connectionContent={
+          <ConnectionPanel
+            connection={runtimeConnection}
+            runningInTauri={runningInTauri}
+            trayEnabled={trayEnabled}
+            onTrayToggle={(enabled) => {
+              setTrayEnabledState(enabled);
+              if (runningInTauri) {
+                setTrayEnabled(enabled).catch((err) =>
+                  appendSystemLog(`状态栏图标设置失败：${err instanceof Error ? err.message : String(err)}`),
+                );
+              }
+            }}
+            onOpenTest={() => setActiveTab("test")}
+            onExportLegacyHistory={() => void handleExportLegacyHistory()}
+            appendSystemLog={appendSystemLog}
+          />
+        }
+        testContent={
+          <RuntimeSmokeChat
             runtimeStatus={runtimeStatus}
             selectedModel={selectedModel}
-            ctxSize={startupParameters.ctxSize}
-            samplingMaxTokens={sampling.maxTokens}
-            conversations={conversations}
-            activeConversation={activeConversation}
-            historyLoading={chatHistoryLoading}
-            searchHaystacks={searchHaystacks}
-            chatHistory={chatHistory}
-            streaming={streaming}
-            streamTokensPerSecond={streamTokensPerSecond}
-            onCreateConversation={createConversation}
-            onSelectConversation={selectConversation}
-            onSaveConversation={saveConversation}
-            onCompressNow={compressActiveConversation}
-            onRenameConversation={renameConversation}
-            onSetPinned={setPinned}
-            onSetArchived={setArchived}
-            onDeleteConversation={deleteConversation}
-            onDeleteMessage={deleteMessagePair}
-            onBranchFromMessage={branchFromMessage}
-            onSend={sendMessage}
-            onCancel={cancelGeneration}
-            onRegenerate={regenerateFromMessage}
-            onEditAndResend={editUserMessageAndResend}
-            onContinueAssistant={continueFromAssistantMessage}
-            onOpenSamplingTab={() => setActiveTab("config")}
-            runtimeMetrics={displayedRuntimeMetrics}
-            onChatHistoryChange={handleChatHistoryChange}
-            onClearHistory={handleClearHistory}
-            onExportConversation={handleExportConversation}
-            onApplySuggestedMaxTokens={(value) =>
-              setSampling((current) => ({ ...current, maxTokens: Math.max(64, value) }))
-            }
+            port={port}
+            sampling={sampling}
+            appendSystemLog={appendSystemLog}
           />
         }
         logs={logs}
         runtimeStatus={runtimeStatus}
-        runtimeMetrics={displayedRuntimeMetrics}
+        runtimeMetrics={runtimeMetrics}
         onStop={handleStop}
         onClearLogs={clearLogs}
       />

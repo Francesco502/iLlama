@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildMaxCapabilitySampling,
+  buildMaxCapabilityStartupParameters,
   buildCommandPreview,
+  builtInProfiles,
+  calculateMaxOutputTokens,
   getProfileById,
   validateLaunchConfig,
 } from "./parameterSchema";
@@ -95,11 +99,33 @@ describe("parameter schema", () => {
     expect(result.errors).toContain("Micro-batch 不能大于 batch size。");
   });
 
-  it("loads built-in balanced profile defaults", () => {
-    const profile = getProfileById("balanced");
+  it("exposes only maximum capability and custom parameter modes", () => {
+    expect(builtInProfiles.map((profile) => profile.id)).toEqual(["max-capability", "custom"]);
 
-    expect(profile.name).toBe("平衡");
+    const profile = getProfileById("custom");
+    expect(profile.name).toBe("自定义");
     expect(profile.parameters.ctxSize).toBe(8192);
     expect(profile.parameters.metrics).toBe(true);
   });
+
+  it("maps old preset ids to custom mode for upgraded settings", () => {
+    expect(getProfileById("balanced").id).toBe("custom");
+    expect(getProfileById("performance").id).toBe("custom");
+  });
+
+  it("derives maximum capability settings from model context length", () => {
+    const parameters = buildMaxCapabilityStartupParameters(65_536, baseConfig.parameters);
+    const sampling = buildMaxCapabilitySampling(parameters.ctxSize, defaultSampling());
+
+    expect(parameters.ctxSize).toBe(65_536);
+    expect(parameters.gpuLayers).toBe("all");
+    expect(parameters.batchSize).toBe(2048);
+    expect(parameters.ubatchSize).toBe(512);
+    expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(65_536));
+    expect(sampling.maxTokens).toBeLessThan(65_536);
+  });
 });
+
+function defaultSampling() {
+  return getProfileById("custom").sampling;
+}

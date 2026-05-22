@@ -26,6 +26,7 @@ describe("SamplingPanel", () => {
       const [sampling, setSampling] = useState<SamplingParameters>(baseSampling);
       return (
         <SamplingPanel
+          parameterMode="custom"
           sampling={sampling}
           ctxSize={8192}
           onSamplingChange={(next) => {
@@ -38,7 +39,7 @@ describe("SamplingPanel", () => {
 
     render(<Host />);
 
-    const input = screen.getByLabelText("生成长度上限（maxTokens）");
+    const input = screen.getByLabelText("输出最大长度");
     await user.clear(input);
     await user.type(input, "256");
 
@@ -48,30 +49,39 @@ describe("SamplingPanel", () => {
     });
   });
 
-  it("applies long memory preset by reducing maxTokens", async () => {
-    const user = userEvent.setup();
+  it("uses a slider for custom output length", () => {
     const onSamplingChange = vi.fn();
 
-    function Host() {
-      const [sampling, setSampling] = useState<SamplingParameters>({ ...baseSampling, maxTokens: 1500 });
-      return (
-        <SamplingPanel
-          sampling={sampling}
-          ctxSize={4096}
-          onSamplingChange={(next) => {
-            setSampling(next);
-            onSamplingChange(next);
-          }}
-        />
-      );
-    }
+    render(
+      <SamplingPanel
+        parameterMode="custom"
+        sampling={baseSampling}
+        ctxSize={8192}
+        onSamplingChange={onSamplingChange}
+      />,
+    );
 
-    render(<Host />);
+    const slider = screen.getByRole("slider", { name: "输出最大长度滑杆" });
+    fireEvent.change(slider, { target: { value: "2048" } });
 
-    await user.click(screen.getByRole("button", { name: "长记忆" }));
-    expect(onSamplingChange).toHaveBeenCalled();
-    const last = onSamplingChange.mock.calls.at(-1)?.[0] as SamplingParameters;
-    expect(last.maxTokens).toBeLessThan(1500);
+    expect(onSamplingChange).toHaveBeenLastCalledWith({
+      ...baseSampling,
+      maxTokens: 2048,
+    });
+  });
+
+  it("shows maximum capability output as automatic", () => {
+    render(
+      <SamplingPanel
+        parameterMode="max-capability"
+        sampling={{ ...baseSampling, maxTokens: 7536 }}
+        ctxSize={8192}
+        onSamplingChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("输出已按当前上下文自动拉到安全上限")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "长记忆" })).not.toBeInTheDocument();
   });
 
   it("exposes advanced sampling fields after expanding", async () => {
@@ -79,11 +89,12 @@ describe("SamplingPanel", () => {
     const onSamplingChange = vi.fn();
 
     function Host() {
-      const [sampling, setSampling] = useState<SamplingParameters>(baseSampling);
+      const [sampling, setSampling] = useState<SamplingParameters>({ ...baseSampling, maxTokens: 1500 });
       return (
         <SamplingPanel
+          parameterMode="custom"
           sampling={sampling}
-          ctxSize={8192}
+          ctxSize={4096}
           onSamplingChange={(next) => {
             setSampling(next);
             onSamplingChange(next);
@@ -111,6 +122,7 @@ describe("SamplingPanel", () => {
       const [sampling, setSampling] = useState<SamplingParameters>(baseSampling);
       return (
         <SamplingPanel
+          parameterMode="custom"
           sampling={sampling}
           ctxSize={8192}
           onSamplingChange={(next) => {
@@ -133,10 +145,9 @@ describe("SamplingPanel", () => {
   it("warns when prompt budget is unhealthy", () => {
     function Host() {
       const [sampling, setSampling] = useState<SamplingParameters>({ ...baseSampling, maxTokens: 4000 });
-      return <SamplingPanel sampling={sampling} ctxSize={4096} onSamplingChange={setSampling} />;
+      return <SamplingPanel parameterMode="custom" sampling={sampling} ctxSize={4096} onSamplingChange={setSampling} />;
     }
     render(<Host />);
     expect(screen.getByText(/预留输出过大可能导致历史上下文不足/)).toBeInTheDocument();
   });
 });
-

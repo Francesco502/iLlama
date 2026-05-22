@@ -1,4 +1,4 @@
-import { Check, Cpu, FolderSearch } from "lucide-react";
+import { Check, Cpu, FolderSearch, Search, X } from "lucide-react";
 import { formatBytes, formatDateTime } from "../lib/format";
 import type { ModelEntry } from "../types/domain";
 
@@ -10,9 +10,19 @@ interface ModelListProps {
   sort: ModelSort;
   onSortChange: (sort: ModelSort) => void;
   onSelect: (path: string) => void;
+  search: string;
+  onSearchChange: (search: string) => void;
 }
 
-export function ModelList({ models, selectedPath, sort, onSortChange, onSelect }: ModelListProps) {
+export function ModelList({
+  models,
+  selectedPath,
+  sort,
+  onSortChange,
+  onSelect,
+  search,
+  onSearchChange,
+}: ModelListProps) {
   return (
     <section className="sidebar-section model-section">
       <div className="section-header">
@@ -26,11 +36,34 @@ export function ModelList({ models, selectedPath, sort, onSortChange, onSelect }
           <span className="count-label">{models.length}</span>
         </div>
       </div>
+
+      <div className="model-search-wrapper">
+        <Search size={13} className="model-search-icon" />
+        <input
+          type="text"
+          className="model-search-input"
+          placeholder="搜索本地模型..."
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          aria-label="搜索模型"
+        />
+        {search && (
+          <button
+            type="button"
+            className="model-search-clear"
+            onClick={() => onSearchChange("")}
+            aria-label="清除搜索"
+          >
+            <X size={13} />
+          </button>
+        )}
+      </div>
+
       <div className="model-list" role="listbox" aria-label="GGUF 模型列表">
         {models.length === 0 && (
           <div className="model-empty">
             <FolderSearch size={24} strokeWidth={1} />
-            <span>选择目录后自动扫描 GGUF 模型</span>
+            <span>{search ? "没有找到匹配的模型" : "选择目录后自动扫描 GGUF 模型"}</span>
           </div>
         )}
         {models.map((model) => {
@@ -50,3 +83,4 @@ export function ModelList({ models, selectedPath, sort, onSortChange, onSelect }
     </section>
   );
 }
+

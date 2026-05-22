@@ -1,53 +1,70 @@
 # iLlama
 
-iLlama 是一个面向 Windows/macOS 的轻量 llama.cpp 可视化启动器。用户指定模型目录后，应用只扫描该目录下的 GGUF 模型，配置常用 `llama-server` 参数，启动/停止本地模型，并在内置界面查看状态、日志和对话。
+iLlama 是一个面向 Windows/macOS 的轻量 llama.cpp 可视化启动器。V3.0.0 起，iLlama 回到 launcher-first 定位：负责扫描本地 GGUF、配置并启动 `llama-server`、展示运行状态和日志，然后把 OpenAI-compatible 连接信息交给 Chatbox、Cherry Studio、Open WebUI、AnythingLLM 或其他聊天客户端。
 
 ## 当前状态
 
-iLlama 已演进到 v2.1.2：Tauri v2 + React + TypeScript + Rust，专注本地 GGUF + 完整对话工作区。
+iLlama v3.0.0：Tauri v2 + React + TypeScript + Rust，专注本地 GGUF 模型启动、监控和外部客户端连接。
 
 核心能力：
 
-- macOS 原生工具风格的三栏 UI 壳
-- 通过原生目录选择接入用户指定的本地模型目录
-- 本地 GGUF 模型目录扫描，含 GGUF header/metadata 轻量读取
-- 启动参数 schema、校验与命令预览（含一键复制）
-- 设置 JSON 持久化与 v1→v2 chat 历史迁移
-- `llama-server` 子进程启动/停止 + 指数退避健康检查（最长 120 s，可取消）
-- 本地多对话工作区：分支、重命名、置顶、归档、删除前导出
-- 助手模式（通用/小说/分析/编码/翻译）+ 对话级 system prompt 编辑入口
-- 流式 OpenAI 兼容 chat completion + 真实 `usage` token 统计 +
-  无 `usage` 时的本地估算回退
-- 自适应上下文压缩：触发比例随上下文与助手模式自动调整
-- 价值导向的上下文裁剪：附件 / 代码块 / 最近轮次优先保留
-- 采样面板：maxTokens 主控 + 长回复/长记忆预设 + 高级参数（temperature/top-p/top-k/min-p/repeat-penalty/seed/stop）
-- 上下文长度对齐提示与"一键对齐"按钮
-- 流式写盘节流（~250 ms）、按对话 id 缓存草稿、`?` 快捷键浮层
-- 图片多模态输入：前端附件预览、OpenAI `image_url` content parts、点击放大
+- macOS 原生工具风格的三栏 UI 壳，支持窗口关闭（X 按钮）时自动隐藏至后台（Dock 栏中）运行，以及点击 Dock 图标重新显示并聚焦主窗口
+- 用户指定模型目录后，仅扫描该目录下的 GGUF 模型
+- GGUF header/metadata 轻量读取
+- `llama-server` 可执行文件自动发现与手动选择
+- 启动参数 schema、校验、预设和命令预览
+- 参数模式：最大能力 / 自定义
+- 最大能力模式会按模型 metadata 自动设置 `ctxSize`，并给内置测试聊天设置安全 `maxTokens`
+- 自定义模式提供上下文长度与输出最大长度滑杆
+- `llama-server` 子进程启动/停止 + 指数退避健康检查
+- 自动端口避让
+- Prometheus runtime 指标读取：CPU、内存、Token/s、KV cache
 - `mmproj` projector 参数：同目录候选识别、手动选择、`--mmproj` / `--no-mmproj-offload`
-- 日志抽屉：按流过滤 + 全文搜索 + 一键清空
+- OpenAI-compatible 连接面板：Base URL、API Key、Model、Chat Completions URL
+- Chatbox、Cherry Studio、Open WebUI、AnythingLLM、自定义客户端 profile
+- 一键复制连接信息或 JSON 配置
+- 连接检测：检查 `/health` 与 `/v1/models`
+- 临时测试聊天：仅用于 smoke test，不保存历史
+- V2 历史导出入口：仅用于迁移旧历史，不再写入新的聊天历史
+- 日志抽屉：按流过滤、全文搜索、一键清空
+- 健全的进程生命周期管理，在应用完全退出（Cmd+Q 或从 Dock 菜单退出）时，可靠地自动清理所有后台的 `llama-server` 进程，防止孤儿进程泄漏
 - macOS `.app` 和 `.dmg` 打包路径
+
+## V3 产品边界
+
+iLlama 不再试图成为完整聊天应用。完整对话历史、分支、写作模式、RAG、知识库、云同步、插件和复杂工作区由外部客户端承担。iLlama 的职责是把本地模型稳定跑起来，并把连接信息清楚交出去。
+
+保留的内置测试聊天只用于确认：
+
+1. 当前模型已启动；
+2. `/v1/chat/completions` 能正常返回；
+3. 图片或文本附件请求格式基本可用。
+
+测试聊天不会保存多会话历史，也不提供写作动作、上下文压缩、分支、归档或导出。
+
+## 外部客户端连接
+
+启动模型后，在「连接」页复制：
+
+```text
+Base URL: http://127.0.0.1:8080/v1
+API Key: llama
+Model: <当前模型文件名>
+```
+
+大多数 OpenAI-compatible 客户端的 API Key 可以填任意非空值；iLlama 默认给出 `llama`。如果客户端要求模型名，可先使用连接页显示的模型文件名；部分 `llama-server` 构建也接受 `local`。
 
 ## 用户向说明
 
-- **ctxSize**：与 `llama-server` 的上下文槽位一致；过小会迫使历史被裁掉，过大占用更多内存与 KV。
-- **maxTokens**：单轮助手输出的上限；与「是否截断」强相关，不是上下文总长。
-- **finish_reason**：`length` / `max_tokens` 表示因输出上限停止，可在同一条消息上点「继续输出」。若流式最后一包未带 reason，应用会在 completion≈maxTokens 时**推断**为 `length` 并写一条系统日志。
-- **继续输出**：优先发送「历史 + 末尾助手 + 续写 user」；若首轮请求失败，或首轮成功但未产生新内容 / completion 未增长，会自动降级为「把已生成助手正文并入末条 user」再试（兼容部分不允许末条为 assistant 的构建）。
-- **KV 条（Prometheus）**：接近 100% 时生成可能变慢；可压缩对话、提高 ctxSize，或参考 KV 条内**建议的 maxTokens 上限**（粗略估算）。工作区在 KV 告警时可一键「采用建议 maxTokens」，仍可在「配置」中再改。
-- **Prometheus 指标名子串**：默认匹配常见 `llama-server` 指标名；若你的构建改过 metric 命名，可在「配置」→「Prometheus 指标名子串」里填逗号分隔的关键片段。例如 KV 指标可填 `kv,used,cells`，Prompt 指标可填 `prompt,tokens,total`，生成 TPS 可把「任含」设为 `tokens,second`、「必含」设为 `generation`。
-- **少见 finish_reason**：`tool_calls` / `content_filter` 等会在消息下方给出简短说明；可设置构建环境变量 `VITE_FINISH_REASON_DOC_URL` 为指向你团队文档的 HTTPS 链接，以显示「说明文档」外链。
+- **ctxSize**：与 `llama-server` 的上下文槽位一致；过大占用更多内存与 KV。
+- **最大能力**：按模型 metadata 拉满上下文，并把内置「测试」聊天的输出最大长度设到安全上限；这代表最大上下文能力，不保证最快。
+- **自定义**：用滑杆调节上下文长度与输出最大长度。修改 `ctxSize` 后需要重启模型才会影响 `llama-server`。
+- **maxTokens**：单轮内置测试请求的输出上限；外部客户端通常也有自己的输出上限，iLlama 不会强行改写 Chatbox、Cherry Studio、Open WebUI 等客户端发送的 `max_tokens`。
+- **Prometheus 指标名子串**：若你的 `llama-server` 构建改过 metric 命名，可在「运行」→「Prometheus 指标名子串」里填逗号分隔的关键片段。
+- **V2 聊天历史**：V3 主界面不再展示完整聊天工作区，也不再写入新的持久聊天历史。旧历史文件不会被主动删除；需要迁移时，在「连接」页使用「导出 V2 历史」生成 legacy JSON bundle。
+- **顶部系统状态栏**：指屏幕顶部包含 Wifi、电池等指标的 macOS 系统状态栏。可在「连接」页面选择「在顶部系统状态栏显示图标」。未启用状态栏图标时，关闭应用窗口依然会保持在 Dock 栏和后台继续运行，不会退出。若要彻底退出应用，请通过 Cmd+Q 快捷键或在底部 Dock 栏图标上右键选择“退出”。
+- **外部客户端兼容性**：发布前验证矩阵见 `docs/client-compatibility.md`。
 
-### 少见 finish_reason（tool_calls / content_filter）
-
-- `tool_calls` / `function_call`：模型按工具协议结束本轮；若界面未展示工具往返，需检查 `llama-server` 与客户端是否对齐工具 schema。
-- `content_filter`：可能触发了安全策略拦截；可改写提示或调整服务端过滤配置。
-
-完整设计方案见：
-
-- `docs/superpowers/plans/2026-05-09-v2.1-local-ai-assistant.md`
-- `docs/superpowers/specs/2026-05-11-context-and-output-length-optimization-design.md`
-- `docs/superpowers/plans/2026-05-06-v1-illama.md`
 
 ## 技术栈
 
@@ -121,7 +138,7 @@ PATH="$HOME/.cargo/bin:$PATH" npm run tauri:build
 
 ## `llama-server`
 
-首个公开版采用外部 `llama-server` 策略：用户需要先安装 `llama-server`，或在应用中手动选择已有可执行文件。当前不会把 Homebrew 的 `llama-server` 直接打进包，因为它依赖 `/opt/homebrew` 下的动态库，不适合作为可迁移 sidecar 发布。
+iLlama 采用外部 `llama-server` 策略：用户需要先安装 `llama-server`，或在应用中手动选择已有可执行文件。当前不会把 Homebrew 的 `llama-server` 直接打进包，因为它依赖 `/opt/homebrew` 下的动态库，不适合作为可迁移 sidecar 发布。
 
 开发阶段如果要准备实验性 sidecar，可以用脚本复制并加上 Tauri 要求的 target triple 后缀：
 
@@ -142,9 +159,10 @@ src-tauri/binaries/
 - 不做全盘扫描
 - 不内置模型下载
 - 不做多模型同时运行
+- 不做完整聊天应用
 - 不做 RAG/向量库/插件系统
-- 多模态保持克制：支持图片输入和文本/思考文本输出显示，音频先不默认开放
-- 优先保证：选择目录、发现 GGUF、配置参数、启动模型、查看日志、聊天、停止释放资源
+- 不做云同步或账户系统
+- 优先保证：选择目录、发现 GGUF、配置参数、启动模型、复制连接信息、查看日志、测试请求、停止释放资源
 
 ## 许可证
 

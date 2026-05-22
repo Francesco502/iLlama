@@ -1,9 +1,7 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 import type { MutableRefObject } from "react";
-import type { ChatHistorySettings } from "../api/tauri";
 import { loadSettings, resolveLlamaServerPath } from "../api/tauri";
 import { getProfileById } from "../lib/parameterSchema";
-import { defaultChatHistorySettings } from "../state/appState";
 import {
   emptyPrometheusHintsConfig,
   type ModelDirectory,
@@ -21,7 +19,6 @@ export interface AppBootstrapOptions {
   hasBootstrappedRef: MutableRefObject<boolean>;
   setBinaryPath: (path: string | null) => void;
   setPort: (port: number) => void;
-  setChatHistory: (next: ChatHistorySettings) => void;
   setProfileId: (id: ParameterProfile["id"]) => void;
   setStartupParameters: Dispatch<SetStateAction<StartupParameters>>;
   setDirectories: (dirs: ModelDirectory[]) => void;
@@ -37,7 +34,6 @@ export function useAppBootstrap({
   hasBootstrappedRef,
   setBinaryPath,
   setPort,
-  setChatHistory,
   setProfileId,
   setStartupParameters,
   setDirectories,
@@ -57,12 +53,11 @@ export function useAppBootstrap({
         if (cancelled) return;
         setBinaryPath(resolvedBinary ?? settings.llamaServerPath);
         setPort(settings.defaultPort || DEFAULT_PORT);
-        setChatHistory(settings.chatHistory ?? defaultChatHistorySettings);
         setPrometheusHints(settings.prometheusHints ?? emptyPrometheusHintsConfig());
-        const loadedProfileId = (settings.defaultPresetId as ParameterProfile["id"]) || "balanced";
-        setProfileId(loadedProfileId);
+        const loadedProfile = getProfileById(settings.defaultPresetId || "max-capability");
+        setProfileId(loadedProfile.id);
         setStartupParameters({
-          ...getProfileById(loadedProfileId).parameters,
+          ...loadedProfile.parameters,
           idleSleepSeconds: settings.idleSleepSeconds,
         });
 
@@ -90,7 +85,6 @@ export function useAppBootstrap({
     runningInTauri,
     scanDirectories,
     setBinaryPath,
-    setChatHistory,
     setDirectories,
     setModels,
     setPort,

@@ -31,6 +31,8 @@ pub struct AppSettings {
     pub prometheus_hints: PrometheusHintsConfig,
     #[serde(default = "default_chat_history_settings")]
     pub chat_history: ChatHistorySettings,
+    #[serde(default)]
+    pub show_in_menu_bar: bool,
 }
 
 pub fn default_settings() -> AppSettings {
@@ -39,7 +41,7 @@ pub fn default_settings() -> AppSettings {
         model_directories: Vec::new(),
         llama_server_path: detect_default_llama_server_path()
             .map(|path| path.to_string_lossy().to_string()),
-        default_preset_id: "balanced".to_string(),
+        default_preset_id: "max-capability".to_string(),
         last_selected_model_path: None,
         auto_port: true,
         default_port: 8080,
@@ -47,6 +49,7 @@ pub fn default_settings() -> AppSettings {
         save_chat_history: None,
         prometheus_hints: PrometheusHintsConfig::default(),
         chat_history: default_chat_history_settings(),
+        show_in_menu_bar: false,
     }
 }
 
@@ -72,8 +75,8 @@ pub fn settings_path(app_data_dir: PathBuf) -> PathBuf {
 
 pub fn default_chat_history_settings() -> ChatHistorySettings {
     ChatHistorySettings {
-        enabled: true,
-        image_persistence: "thumbnail".to_string(),
+        enabled: false,
+        image_persistence: "none".to_string(),
         include_reasoning_in_export_default: false,
         max_conversations: 200,
     }
@@ -95,6 +98,11 @@ fn migrate_settings(mut settings: AppSettings) -> AppSettings {
         };
         settings.save_chat_history = None;
     }
+    settings.default_preset_id = match settings.default_preset_id.as_str() {
+        "max-capability" | "custom" => settings.default_preset_id,
+        "low-memory" | "balanced" | "performance" => "custom".to_string(),
+        _ => "max-capability".to_string(),
+    };
     settings
 }
 

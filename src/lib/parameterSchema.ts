@@ -19,74 +19,110 @@ export const defaultSampling: SamplingParameters = {
   stop: [],
 };
 
+export const DEFAULT_CUSTOM_CONTEXT_SIZE = 8192;
+export const FALLBACK_MAX_CONTEXT_SIZE = 32768;
+export const MAX_CONTEXT_SIZE = 131072;
+
+const customParameters: StartupParameters = {
+  ctxSize: DEFAULT_CUSTOM_CONTEXT_SIZE,
+  threads: "auto",
+  threadsBatch: "auto",
+  gpuLayers: "auto",
+  batchSize: 1024,
+  ubatchSize: 256,
+  flashAttention: "auto",
+  mmap: true,
+  mlock: false,
+  metrics: true,
+  idleSleepSeconds: 0,
+  mmprojPath: null,
+  mmprojOffload: true,
+};
+
 export const builtInProfiles: ParameterProfile[] = [
   {
-    id: "low-memory",
-    name: "低内存",
-    description: "优先降低内存占用，适合轻量模型和低配电脑。",
+    id: "max-capability",
+    name: "最大能力",
+    description: "按模型元数据自动拉满上下文，并给测试聊天设置安全输出上限。",
     parameters: {
-      ctxSize: 4096,
-      threads: "auto",
-      threadsBatch: "auto",
-      gpuLayers: 0,
-      batchSize: 512,
-      ubatchSize: 128,
-      flashAttention: "auto",
-      mmap: true,
-      mlock: false,
-      metrics: false,
-      idleSleepSeconds: 0,
-      mmprojPath: null,
-      mmprojOffload: true,
-    },
-    sampling: defaultSampling,
-  },
-  {
-    id: "balanced",
-    name: "平衡",
-    description: "兼顾速度和稳定性，推荐作为默认启动方案。",
-    parameters: {
-      ctxSize: 8192,
-      threads: "auto",
-      threadsBatch: "auto",
-      gpuLayers: "auto",
-      batchSize: 1024,
-      ubatchSize: 256,
-      flashAttention: "auto",
-      mmap: true,
-      mlock: false,
-      metrics: true,
-      idleSleepSeconds: 0,
-      mmprojPath: null,
-      mmprojOffload: true,
-    },
-    sampling: defaultSampling,
-  },
-  {
-    id: "performance",
-    name: "高性能",
-    description: "提高上下文和批处理配置，适合资源更充足的电脑。",
-    parameters: {
-      ctxSize: 16384,
-      threads: "auto",
-      threadsBatch: "auto",
-      gpuLayers: "auto",
+      ...customParameters,
+      ctxSize: FALLBACK_MAX_CONTEXT_SIZE,
+      gpuLayers: "all",
       batchSize: 2048,
       ubatchSize: 512,
-      flashAttention: "auto",
-      mmap: true,
-      mlock: false,
-      metrics: true,
-      idleSleepSeconds: 0,
-      mmprojPath: null,
-      mmprojOffload: true,
     },
+    sampling: {
+      ...defaultSampling,
+      maxTokens: calculateMaxOutputTokens(FALLBACK_MAX_CONTEXT_SIZE),
+    },
+  },
+  {
+    id: "custom",
+    name: "自定义",
+    description: "手动调整上下文长度、输出长度和高级启动参数。",
+    parameters: customParameters,
     sampling: defaultSampling,
   },
 ];
 
-export function getProfileById(id: ParameterProfile["id"]): ParameterProfile {
+export function getProfileById(id: string): ParameterProfile {
   return builtInProfiles.find((profile) => profile.id === id) ?? builtInProfiles[1];
+}
+
+export function resolveModelContextLimit(modelContextLength: number | null | undefined): number {
+  if (!Number.isFinite(modelContextLength) || !modelContextLength || modelContextLength <= 0) {
+    return FALLBACK_MAX_CONTEXT_SIZE;
+  }
+  return clampToStep(modelContextLength, 1024, MAX_CONTEXT_SIZE, 1024);
+}
+
+export function calculateMaxOutputTokens(ctxSize: number): number {
+  const safeCtx = clampToStep(ctxSize, 512, MAX_CONTEXT_SIZE, 1);
+  const reserve = Math.max(256, Math.ceil(safeCtx * 0.08));
+  return clampToStep(safeCtx - reserve, 64, Math.max(64, safeCtx - 1), 64);
+}
+
+export function buildMaxCapabilityStartupParameters(
+  modelContextLength: number | null | undefined,
+  current: StartupParameters,
+): StartupParameters {
+  const ctxSize = resolveModelContextLimit(modelContextLength);
+  const batch = batchForContext(ctxSize);
+  return {
+    ...current,
+    ctxSize,
+    gpuLayers: "all",
+    batchSize: batch.batchSize,
+    ubatchSize: batch.ubatchSize,
+    flashAttention: current.flashAttention === "off" ? "auto" : current.flashAttention,
+    mmap: true,
+    metrics: true,
+  };
+}
+
+export function buildMaxCapabilitySampling(
+  ctxSize: number,
+  current: SamplingParameters,
+): SamplingParameters {
+  return {
+    ...current,
+    maxTokens: calculateMaxOutputTokens(ctxSize),
+  };
+}
+
+function batchForContext(ctxSize: number): Pick<StartupParameters, "batchSize" | "ubatchSize"> {
+  if (ctxSize >= 32768) {
+    return { batchSize: 2048, ubatchSize: 512 };
+  }
+  if (ctxSize >= 8192) {
+    return { batchSize: 1024, ubatchSize: 256 };
+  }
+  return { batchSize: 512, ubatchSize: 128 };
+}
+
+function clampToStep(value: number, min: number, max: number, step: number): number {
+  const clamped = Math.min(max, Math.max(min, Math.floor(value)));
+  return Math.max(min, Math.floor(clamped / step) * step);
 }
 
 export function validateLaunchConfig(config: LaunchConfig): ValidationResult {
