@@ -1,10 +1,10 @@
 # Release Checklist
 
-Current release target: `v3.0.0`.
+Current release target: `v3.1.0`.
 
-## v3.0.0 Launcher-First Release
+## v3.1.0 Release
 
-- [x] App metadata versions aligned to `3.0.0` in npm, Tauri, and Rust crate metadata
+- [x] App metadata versions aligned to `3.1.0` in npm, Tauri, and Rust crate metadata
 - [x] Primary navigation is `运行 / 连接 / 测试`
 - [x] Parameter modes are reduced to `最大能力 / 自定义`
 - [x] Maximum capability mode derives `ctxSize` from model metadata and auto-sets smoke-test `maxTokens`

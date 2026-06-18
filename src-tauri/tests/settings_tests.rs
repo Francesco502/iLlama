@@ -14,6 +14,7 @@ fn creates_default_settings_when_file_is_missing() {
     assert_eq!(settings.schema_version, 2);
     assert!(settings.model_directories.is_empty());
     assert_eq!(settings.default_preset_id, "max-capability");
+    assert_eq!(settings.parameter_preset_source_id, "model-family:auto");
     assert_eq!(settings.default_port, 8080);
     assert!(!settings.chat_history.enabled);
     assert_eq!(settings.chat_history.image_persistence, "none");
@@ -70,6 +71,31 @@ fn migrates_old_parameter_presets_to_custom_mode() {
     let loaded = load_settings_from(&path).unwrap();
 
     assert_eq!(loaded.default_preset_id, "custom");
+}
+
+#[test]
+fn normalizes_unknown_parameter_source_to_model_family_auto() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    fs::write(
+        &path,
+        r#"{
+          "schemaVersion": 2,
+          "modelDirectories": [],
+          "llamaServerPath": null,
+          "defaultPresetId": "custom",
+          "parameterPresetSourceId": "user:removed",
+          "lastSelectedModelPath": null,
+          "autoPort": true,
+          "defaultPort": 8080,
+          "idleSleepSeconds": 0
+        }"#,
+    )
+    .unwrap();
+
+    let loaded = load_settings_from(&path).unwrap();
+
+    assert_eq!(loaded.parameter_preset_source_id, "model-family:auto");
 }
 
 #[test]

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppLayout } from "./AppLayout";
@@ -52,5 +54,14 @@ describe("AppLayout", () => {
     fireEvent.mouseUp(window);
 
     expect(drawer).toHaveStyle({ height: "260px" });
+  });
+
+  it("keeps the bottom status bar on one line on narrow screens", () => {
+    const styles = readFileSync(join(process.cwd(), "src/styles.css"), "utf8");
+    const statusBarRule = styles.match(/\.status-bar\s*{(?<body>[^}]+)}/)?.groups?.body ?? "";
+    const statusMetricRule = styles.match(/\.status-metric\s*{(?<body>[^}]+)}/)?.groups?.body ?? "";
+
+    expect(statusBarRule).toContain("white-space: nowrap");
+    expect(statusMetricRule).toContain("flex: 0 0 auto");
   });
 });

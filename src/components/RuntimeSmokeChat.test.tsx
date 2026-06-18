@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { defaultSampling } from "../lib/parameterSchema";
 import type { ModelEntry } from "../types/domain";
@@ -49,5 +50,27 @@ describe("RuntimeSmokeChat", () => {
     );
 
     expect(screen.getByPlaceholderText("启动模型后即可发送")).toBeDisabled();
+  });
+
+  it("shows image attachments after they are sent in the smoke-test thread", async () => {
+    const user = userEvent.setup();
+    render(
+      <RuntimeSmokeChat
+        runtimeStatus="healthy"
+        selectedModel={selectedModel}
+        port={8080}
+        sampling={defaultSampling}
+        appendSystemLog={() => undefined}
+      />,
+    );
+
+    const image = new File(["image-bytes"], "scene.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("选择图片或文本附件"), image);
+
+    await screen.findByText("scene.png");
+    await waitFor(() => expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "发送消息" }));
+
+    expect(await screen.findByAltText("scene.png")).toBeInTheDocument();
   });
 });

@@ -199,10 +199,12 @@ pub fn build_command_args(config: &LaunchConfig) -> Vec<String> {
         config.parameters.ubatch_size.to_string(),
     ];
 
-    match config.parameters.flash_attention {
-        FlashAttentionSetting::On => args.push("--flash-attn".to_string()),
-        FlashAttentionSetting::Auto | FlashAttentionSetting::Off => {}
-    }
+    args.push("--flash-attn".to_string());
+    args.push(match config.parameters.flash_attention {
+        FlashAttentionSetting::Auto => "auto".to_string(),
+        FlashAttentionSetting::On => "on".to_string(),
+        FlashAttentionSetting::Off => "off".to_string(),
+    });
 
     args.push(if config.parameters.mmap {
         "--mmap".to_string()

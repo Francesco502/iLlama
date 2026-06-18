@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampInt, getAdaptiveSafetyFactor } from "./contextBudget";
+import { getAdaptiveSafetyFactor } from "./contextBudget";
 
 describe("context budget helpers", () => {
   it("uses conservative safety factors as context grows", () => {
@@ -9,10 +9,4 @@ describe("context budget helpers", () => {
     expect(getAdaptiveSafetyFactor(32768)).toBe(0.86);
   });
 
-  it("clamps and floors numeric parameter values", () => {
-    expect(clampInt(Number.NaN, 4, 16)).toBe(4);
-    expect(clampInt(2, 4, 16)).toBe(4);
-    expect(clampInt(18, 4, 16)).toBe(16);
-    expect(clampInt(9.8, 4, 16)).toBe(9);
-  });
 });

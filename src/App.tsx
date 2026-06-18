@@ -26,9 +26,15 @@ import {
   resolveModelContextLimit,
   validateLaunchConfig,
 } from "./lib/parameterSchema";
+import {
+  applyParameterPresetSource,
+  MODEL_FAMILY_AUTO_PRESET_SOURCE_ID,
+  parameterPresetSources,
+  type ParameterPresetSourceId,
+} from "./lib/parameterPresets";
 import { buildRuntimeConnection } from "./lib/externalClients";
 import { demoModelDirectories, demoModels } from "./state/appStore";
-import { buildSettingsSnapshot } from "./state/appState";
+import { buildSettingsSnapshot, reconcileMmprojPathForModel } from "./state/appState";
 import { useAppBootstrap } from "./hooks/useAppBootstrap";
 import { useDebouncedSettingsPersist } from "./hooks/useDebouncedSettingsPersist";
 import { useLlamaProcess } from "./hooks/useLlamaProcess";
@@ -71,6 +77,9 @@ export function App() {
   const [binaryPath, setBinaryPath] = useState<string | null>(null);
   const [port, setPort] = useState(DEFAULT_PORT);
   const [profileId, setProfileId] = useState<ParameterProfile["id"]>("max-capability");
+  const [parameterPresetSourceId, setParameterPresetSourceId] = useState<ParameterPresetSourceId>(
+    MODEL_FAMILY_AUTO_PRESET_SOURCE_ID,
+  );
   const [startupParameters, setStartupParameters] = useState(getProfileById("max-capability").parameters);
   const [prometheusHints, setPrometheusHints] = useState<PrometheusHintsConfig>(emptyPrometheusHintsConfig);
   const [activeTab, setActiveTab] = useState<AppTab>("run");
@@ -83,6 +92,15 @@ export function App() {
   const profile = getProfileById(profileId);
   const selectedModel = models.find((model) => model.path === selectedModelPath) ?? null;
   const [sampling, setSampling] = useState(profile.sampling);
+  const appliedParameterPreset = useMemo(
+    () => applyParameterPresetSource(parameterPresetSourceId, selectedModel, startupParameters, sampling),
+    [
+      parameterPresetSourceId,
+      sampling,
+      selectedModel,
+      startupParameters,
+    ],
+  );
   const contextLengthMismatch =
     selectedModel?.contextLength && selectedModel.contextLength > 0
       ? computeContextLengthMismatch(selectedModel.contextLength, startupParameters.ctxSize)
@@ -133,6 +151,7 @@ export function App() {
         directories,
         binaryPath,
         profileId,
+        parameterPresetSourceId,
         selectedModelPath,
         port,
         startupParameters,
@@ -142,6 +161,7 @@ export function App() {
       binaryPath,
       directories,
       port,
+      parameterPresetSourceId,
       profileId,
       prometheusHints,
       selectedModelPath,
@@ -169,6 +189,7 @@ export function App() {
     setBinaryPath,
     setPort,
     setProfileId,
+    setParameterPresetSourceId,
     setStartupParameters,
     setDirectories,
     setModels,
@@ -217,14 +238,31 @@ export function App() {
   );
 
   useEffect(() => {
-    if (profileId !== "max-capability") {
-      return;
-    }
-    setStartupParameters((current) => buildMaxCapabilityStartupParameters(selectedModel?.contextLength ?? null, current));
-    setSampling((current) => {
-      return buildMaxCapabilitySampling(resolveModelContextLimit(selectedModel?.contextLength ?? null), current);
+    setStartupParameters((current) => {
+      const base =
+        profileId === "max-capability"
+          ? buildMaxCapabilityStartupParameters(selectedModel?.contextLength ?? null, current)
+          : current;
+      return applyParameterPresetSource(parameterPresetSourceId, selectedModel, base, getProfileById("custom").sampling)
+        .parameters;
     });
-  }, [profileId, selectedModel?.contextLength]);
+    setSampling((current) => {
+      const base =
+        profileId === "max-capability"
+          ? buildMaxCapabilitySampling(resolveModelContextLimit(selectedModel?.contextLength ?? null), current)
+          : current;
+      return applyParameterPresetSource(
+        parameterPresetSourceId,
+        selectedModel,
+        getProfileById("custom").parameters,
+        base,
+      ).sampling;
+    });
+  }, [
+    parameterPresetSourceId,
+    profileId,
+    selectedModel,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -362,8 +400,9 @@ export function App() {
     const nextModel = models.find((model) => model.path === path) ?? null;
     setSelectedModelPath(path);
     setStartupParameters((current) => {
-      if (!current.mmprojPath || nextModel?.mmprojCandidates.includes(current.mmprojPath)) return current;
-      return { ...current, mmprojPath: null };
+      const mmprojPath = reconcileMmprojPathForModel(current.mmprojPath, nextModel);
+      if (mmprojPath === current.mmprojPath) return current;
+      return { ...current, mmprojPath };
     });
   }
 
@@ -387,7 +426,7 @@ export function App() {
         <div className="title-block">
           <Cpu size={16} />
           <h1>iLlama</h1>
-          <span className="version-badge">v3.0.0</span>
+          <span className="version-badge">v3.1.0</span>
         </div>
         <div className="topbar-actions">
           <button className="ghost-button" type="button" onClick={handleSelectBinary}>
@@ -481,6 +520,15 @@ export function App() {
               onSelectMmproj={handleSelectMmproj}
               validation={launchValidation}
               prometheusHints={prometheusHints}
+              parameterPresetSourceId={parameterPresetSourceId}
+              parameterPresetSources={parameterPresetSources}
+              appliedParameterPresetName={appliedParameterPreset.appliedPreset.name}
+              onParameterPresetSourceChange={(id) => {
+                setParameterPresetSourceId(id);
+                const adjusted = applyParameterPresetSource(id, selectedModel, startupParameters, sampling);
+                setStartupParameters(adjusted.parameters);
+                setSampling(adjusted.sampling);
+              }}
               onPrometheusHintsChange={setPrometheusHints}
               onParametersChange={setStartupParameters}
               onProfileChange={(id) => {
@@ -490,8 +538,15 @@ export function App() {
                     selectedModel?.contextLength ?? null,
                     startupParameters,
                   );
-                  setStartupParameters(nextParameters);
-                  setSampling((current) => buildMaxCapabilitySampling(nextParameters.ctxSize, current));
+                  const nextSampling = buildMaxCapabilitySampling(nextParameters.ctxSize, sampling);
+                  const adjusted = applyParameterPresetSource(
+                    parameterPresetSourceId,
+                    selectedModel,
+                    nextParameters,
+                    nextSampling,
+                  );
+                  setStartupParameters(adjusted.parameters);
+                  setSampling(adjusted.sampling);
                 }
               }}
             />
@@ -529,6 +584,7 @@ export function App() {
             port={port}
             sampling={sampling}
             appendSystemLog={appendSystemLog}
+            onNavigateToRun={() => setActiveTab("run")}
           />
         }
         logs={logs}

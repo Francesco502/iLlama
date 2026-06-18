@@ -1,5 +1,7 @@
-import { Trash2, User, Bot, Cpu, Zap } from "lucide-react";
+import { Trash2, User, Bot, Cpu, Zap, FileText } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { useRuntimeSmokeChat } from "../hooks/useRuntimeSmokeChat";
+import type { ChatAttachment, ChatMessage } from "../types/chat";
 import type { ModelEntry, RuntimeStatus, SamplingParameters } from "../types/domain";
 import { MarkdownContent } from "./MarkdownContent";
 import { SmokeChatComposer } from "./SmokeChatComposer";
@@ -10,6 +12,7 @@ interface RuntimeSmokeChatProps {
   port: number;
   sampling: SamplingParameters;
   appendSystemLog: (message: string) => void;
+  onNavigateToRun?: () => void;
 }
 
 export function RuntimeSmokeChat({
@@ -18,6 +21,7 @@ export function RuntimeSmokeChat({
   port,
   sampling,
   appendSystemLog,
+  onNavigateToRun,
 }: RuntimeSmokeChatProps) {
   const {
     messages,
@@ -34,6 +38,14 @@ export function RuntimeSmokeChat({
   });
   const disabledReason = runtimeStatus === "healthy" ? (streaming ? "streaming" : undefined) : "runtime";
   const disabled = Boolean(disabledReason);
+
+  const threadRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+  }, [messages, streaming]);
 
   return (
     <section className="runtime-smoke-chat panel" aria-label="临时测试对话">
@@ -88,11 +100,30 @@ export function RuntimeSmokeChat({
         </div>
       </div>
 
-      <div className="runtime-smoke-chat-thread" aria-label="测试消息列表">
+      <div className="runtime-smoke-chat-thread" ref={threadRef} aria-label="测试消息列表">
         {messages.length === 0 ? (
           <div className="chat-empty-state">
-            <h3>发送一条测试消息</h3>
-            <p>如果这里能回复，就可以把连接信息填到 Chatbox、Cherry Studio 或其他客户端里。</p>
+            {runtimeStatus !== "healthy" ? (
+              <>
+                <h3>本地推理服务未运行</h3>
+                <p>请先在运行面板中选择并开启模型。</p>
+                {onNavigateToRun && (
+                  <button
+                    type="button"
+                    className="start-button secondary"
+                    onClick={onNavigateToRun}
+                    style={{ marginTop: 12 }}
+                  >
+                    前往配置与运行
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <h3>发送一条测试消息</h3>
+                <p>如果这里能回复，就可以把连接信息填到 Chatbox、Cherry Studio 或其他客户端里。</p>
+              </>
+            )}
           </div>
         ) : (
           messages.map((message) => (
@@ -109,7 +140,7 @@ export function RuntimeSmokeChat({
                   {message.role === "assistant" ? (
                     <MarkdownContent text={message.content || (message.status === "streaming" ? "…" : "")} />
                   ) : (
-                    <p>{message.content}</p>
+                    <UserSmokeMessageContent message={message} />
                   )}
                 </div>
                 {message.status === "failed" && (
@@ -133,6 +164,41 @@ export function RuntimeSmokeChat({
   );
 }
 
+function UserSmokeMessageContent({ message }: { message: ChatMessage }) {
+  const attachments = message.attachments ?? [];
+
+  return (
+    <>
+      {message.content.trim().length > 0 && <p>{message.content}</p>}
+      {attachments.length > 0 && (
+        <div className="smoke-message-attachments" aria-label="消息附件">
+          {attachments.map((attachment) => (
+            <SmokeMessageAttachment attachment={attachment} key={attachment.id} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function SmokeMessageAttachment({ attachment }: { attachment: ChatAttachment }) {
+  const isImage = attachment.mimeType.toLowerCase().startsWith("image/");
+  const imageUrl = attachment.thumbnailUrl || attachment.dataUrl;
+
+  return (
+    <div className="smoke-message-attachment">
+      {isImage && imageUrl ? (
+        <img alt={attachment.name} src={imageUrl} />
+      ) : (
+        <span className="smoke-message-attachment-icon" aria-hidden>
+          <FileText size={14} />
+        </span>
+      )}
+      <span>{attachment.name}</span>
+    </div>
+  );
+}
+
 function statusLabel(status: string): string {
   switch (status) {
     case "complete":
@@ -145,4 +211,3 @@ function statusLabel(status: string): string {
       return status;
   }
 }
-

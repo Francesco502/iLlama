@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { getProfileById } from "../lib/parameterSchema";
+import { MODEL_FAMILY_AUTO_PRESET_SOURCE_ID, parameterPresetSources } from "../lib/parameterPresets";
 import { ParameterPanel } from "./ParameterPanel";
 import type { PrometheusHintsConfig, StartupParameters } from "../types/domain";
 import { emptyPrometheusHintsConfig } from "../types/domain";
@@ -25,6 +26,10 @@ describe("ParameterPanel", () => {
           port={8080}
           onPortChange={vi.fn()}
           prometheusHints={hints}
+          parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+          parameterPresetSources={parameterPresetSources}
+          appliedParameterPresetName="Llama 通用"
+          onParameterPresetSourceChange={vi.fn()}
           onPrometheusHintsChange={(next) => {
             setHints(next);
             onPrometheusHintsChange(next);
@@ -65,6 +70,10 @@ describe("ParameterPanel", () => {
         port={8080}
         onPortChange={vi.fn()}
         prometheusHints={emptyPrometheusHintsConfig()}
+        parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+        parameterPresetSources={parameterPresetSources}
+        appliedParameterPresetName="Llama 通用"
+        onParameterPresetSourceChange={vi.fn()}
         onPrometheusHintsChange={vi.fn()}
         onParametersChange={vi.fn()}
         onProfileChange={vi.fn()}
@@ -74,5 +83,83 @@ describe("ParameterPanel", () => {
     expect(screen.getByText("已按模型能力自动拉满上下文")).toBeInTheDocument();
     expect(screen.getByText("32,768")).toBeInTheDocument();
     expect(screen.queryByLabelText("上下文长度")).not.toBeInTheDocument();
+  });
+
+  it("emits parameter preset source changes", async () => {
+    const user = userEvent.setup();
+    const profile = getProfileById("custom");
+    const onParameterPresetSourceChange = vi.fn();
+
+    render(
+      <ParameterPanel
+        profile={profile}
+        parameters={profile.parameters}
+        modelContextLength={32768}
+        port={8080}
+        onPortChange={vi.fn()}
+        prometheusHints={emptyPrometheusHintsConfig()}
+        parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+        parameterPresetSources={parameterPresetSources}
+        appliedParameterPresetName="Qwen 通用"
+        onParameterPresetSourceChange={onParameterPresetSourceChange}
+        onPrometheusHintsChange={vi.fn()}
+        onParametersChange={vi.fn()}
+        onProfileChange={vi.fn()}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("参数来源"), "user:low-memory");
+
+    expect(onParameterPresetSourceChange).toHaveBeenCalledWith("user:low-memory");
+  });
+
+  it("warns when projector candidates exist but none is enabled", () => {
+    const profile = getProfileById("custom");
+
+    render(
+      <ParameterPanel
+        profile={profile}
+        parameters={{ ...profile.parameters, mmprojPath: null }}
+        modelContextLength={32768}
+        port={8080}
+        onPortChange={vi.fn()}
+        mmprojCandidates={["/models/mmproj-gemma.gguf"]}
+        prometheusHints={emptyPrometheusHintsConfig()}
+        parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+        parameterPresetSources={parameterPresetSources}
+        appliedParameterPresetName="Gemma"
+        onParameterPresetSourceChange={vi.fn()}
+        onPrometheusHintsChange={vi.fn()}
+        onParametersChange={vi.fn()}
+        onProfileChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("发现 projector，但尚未启用，图片输入不会生效。")).toBeInTheDocument();
+  });
+
+  it("shows when a projector is enabled", () => {
+    const profile = getProfileById("custom");
+
+    render(
+      <ParameterPanel
+        profile={profile}
+        parameters={{ ...profile.parameters, mmprojPath: "/models/mmproj-gemma.gguf" }}
+        modelContextLength={32768}
+        port={8080}
+        onPortChange={vi.fn()}
+        mmprojCandidates={["/models/mmproj-gemma.gguf"]}
+        prometheusHints={emptyPrometheusHintsConfig()}
+        parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+        parameterPresetSources={parameterPresetSources}
+        appliedParameterPresetName="Gemma"
+        onParameterPresetSourceChange={vi.fn()}
+        onPrometheusHintsChange={vi.fn()}
+        onParametersChange={vi.fn()}
+        onProfileChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Projector 已启用，图片会随请求发送给 llama-server。")).toBeInTheDocument();
   });
 });

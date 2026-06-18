@@ -1,5 +1,6 @@
 import { FileSearch, Settings2, HelpCircle } from "lucide-react";
 import { builtInProfiles, resolveModelContextLimit } from "../lib/parameterSchema";
+import type { ParameterPresetSource, ParameterPresetSourceId } from "../lib/parameterPresets";
 import type { ParameterProfile, PrometheusHintsConfig, StartupParameters, ValidationResult } from "../types/domain";
 
 interface ParameterPanelProps {
@@ -12,6 +13,10 @@ interface ParameterPanelProps {
   onSelectMmproj?: () => void;
   validation?: ValidationResult;
   prometheusHints: PrometheusHintsConfig;
+  parameterPresetSourceId: ParameterPresetSourceId;
+  parameterPresetSources: ParameterPresetSource[];
+  appliedParameterPresetName: string;
+  onParameterPresetSourceChange: (id: ParameterPresetSourceId) => void;
   onPrometheusHintsChange: (next: PrometheusHintsConfig) => void;
   onProfileChange: (id: ParameterProfile["id"]) => void;
   onParametersChange: (parameters: StartupParameters) => void;
@@ -22,6 +27,10 @@ export function ParameterPanel({
   mmprojCandidates = [], onSelectMmproj,
   validation,
   prometheusHints,
+  parameterPresetSourceId,
+  parameterPresetSources,
+  appliedParameterPresetName,
+  onParameterPresetSourceChange,
   onPrometheusHintsChange,
   onProfileChange, onParametersChange,
 }: ParameterPanelProps) {
@@ -30,6 +39,7 @@ export function ParameterPanel({
   }
   const modelContextLimit = resolveModelContextLimit(modelContextLength);
   const customMode = profile.id === "custom";
+  const mmprojEnabled = Boolean(parameters.mmprojPath?.trim());
 
   return (
     <section className="panel">
@@ -47,6 +57,25 @@ export function ParameterPanel({
       <div className="parameter-mode-note">
         <strong>{profile.name}</strong>
         <span>{profile.description}</span>
+      </div>
+      <div className="parameter-mode-note">
+        <label className="field field-stretch">
+          <FieldLabel
+            label="参数来源"
+            tooltip="选择 App 内置模型族参数或用户常用 preset；切换后会覆盖采样、Flash Attention 和部分 batch 设置。"
+          />
+          <select
+            value={parameterPresetSourceId}
+            onChange={(event) => onParameterPresetSourceChange(event.target.value as ParameterPresetSourceId)}
+          >
+            {parameterPresetSources.map((source) => (
+              <option key={source.id} value={source.id}>
+                {source.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span>当前应用：{appliedParameterPresetName}</span>
       </div>
       {customMode ? (
         <ContextLengthControl
@@ -154,6 +183,19 @@ export function ParameterPanel({
                 {fileName(candidate)}
               </button>
             ))}
+          </div>
+        )}
+        {mmprojEnabled ? (
+          <div className="multimodal-status" data-kind="ready">
+            Projector 已启用，图片会随请求发送给 llama-server。
+          </div>
+        ) : mmprojCandidates.length > 0 ? (
+          <div className="multimodal-status" data-kind="warning">
+            发现 projector，但尚未启用，图片输入不会生效。
+          </div>
+        ) : (
+          <div className="multimodal-status" data-kind="idle">
+            未启用 projector；纯文本模型可忽略，图片输入需要对应 mmproj。
           </div>
         )}
         <ToggleRow label="Projector GPU offload" enabled={parameters.mmprojOffload} onToggle={() => update("mmprojOffload", !parameters.mmprojOffload)} />
@@ -417,4 +459,3 @@ function parseGpuLayers(value: string): StartupParameters["gpuLayers"] {
 function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
-

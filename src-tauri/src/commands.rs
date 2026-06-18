@@ -23,7 +23,7 @@ pub fn build_command_args_command(config: LaunchConfig) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn scan_model_directory_command(path: String) -> Result<Vec<ModelEntry>, String> {
+pub async fn scan_model_directory_command(path: String) -> Result<Vec<ModelEntry>, String> {
     scan_model_directory(path.as_ref()).map_err(|error| error.to_string())
 }
 
@@ -60,7 +60,7 @@ pub fn resolve_llama_server_path_command(
 }
 
 #[tauri::command]
-pub fn save_settings_command(app: AppHandle, settings: AppSettings) -> Result<(), String> {
+pub async fn save_settings_command(app: AppHandle, settings: AppSettings) -> Result<(), String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -91,8 +91,10 @@ pub fn stop_llama_command(state: State<'_, LlamaProcessState>) -> Result<Runtime
 }
 
 #[tauri::command]
-pub fn runtime_snapshot_command(state: State<'_, LlamaProcessState>) -> RuntimeSnapshot {
-    state.snapshot()
+pub async fn runtime_snapshot_command(
+    state: State<'_, LlamaProcessState>,
+) -> Result<RuntimeSnapshot, String> {
+    Ok(state.snapshot())
 }
 
 #[tauri::command]
@@ -101,7 +103,7 @@ pub fn confirm_health_command(state: State<'_, LlamaProcessState>) {
 }
 
 #[tauri::command]
-pub fn check_health_command(host: String, port: u16) -> HealthStatus {
+pub async fn check_health_command(host: String, port: u16) -> HealthStatus {
     check_http_health(&host, port, 500)
 }
 
@@ -122,10 +124,7 @@ pub fn set_tray_enabled_command(app: AppHandle, enabled: bool) -> Result<(), Str
     }
 
     // Persist the preference
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let path = settings_path(app_data_dir);
     let mut settings = load_settings_from(&path).map_err(|e| e.to_string())?;
     settings.show_in_menu_bar = enabled;

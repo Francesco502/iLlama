@@ -14,6 +14,7 @@ export interface AppSettings {
   modelDirectories: string[];
   llamaServerPath: string | null;
   defaultPresetId: string;
+  parameterPresetSourceId?: string;
   lastSelectedModelPath: string | null;
   autoPort: boolean;
   defaultPort: number;

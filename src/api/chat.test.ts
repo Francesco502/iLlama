@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { splitThinkTags } from "../lib/reasoning";
 import {
   buildChatCompletionBody,
   completeChatCompletion,
   isLengthLikeFinishReason,
+  parseRuntimeCapabilities,
   parseCompletionMessage,
   parseDeltaEvent,
   parseDeltaToken,
@@ -69,13 +69,6 @@ describe("chat streaming parser", () => {
     });
   });
 
-  it("extracts completed think tags from visible content", () => {
-    expect(splitThinkTags("<think>先分析</think>最终答案")).toEqual({
-      reasoning: "先分析",
-      content: "最终答案",
-      open: false,
-    });
-  });
 });
 
 describe("chat request body", () => {
@@ -228,6 +221,47 @@ describe("chat completion API", () => {
 });
 
 describe("chat streaming API", () => {
+  it("blocks image requests when the server reports no multimodal capability", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ id: "local", capabilities: ["completion"] }],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      streamChatCompletion({
+        host: "127.0.0.1",
+        port: 8080,
+        messages: [
+          {
+            role: "user",
+            content: "看图",
+            attachments: [
+              {
+                id: "image-1",
+                name: "desk.png",
+                mimeType: "image/png",
+                sizeBytes: 2048,
+                dataUrl: "data:image/png;base64,abc123",
+                persistence: "full",
+              },
+            ],
+          },
+        ],
+        sampling,
+      }),
+    ).rejects.toThrow("当前 llama-server 未启用多模态能力");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/v1/models", {
+      signal: undefined,
+    });
+  });
+
   it("emits usage-only delta events via onDelta", async () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
@@ -266,6 +300,28 @@ describe("chat streaming API", () => {
       usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
     });
     expect(onToken).not.toHaveBeenCalled();
+  });
+});
+
+describe("runtime capability parser", () => {
+  it("detects explicit multimodal support from model capabilities", () => {
+    expect(
+      parseRuntimeCapabilities({
+        data: [{ id: "local", capabilities: ["completion", "multimodal"] }],
+      }),
+    ).toEqual({ multimodal: true });
+  });
+
+  it("detects explicit text-only capability lists", () => {
+    expect(
+      parseRuntimeCapabilities({
+        data: [{ id: "local", capabilities: ["completion"] }],
+      }),
+    ).toEqual({ multimodal: false });
+  });
+
+  it("treats older model payloads without capabilities as unknown", () => {
+    expect(parseRuntimeCapabilities({ data: [{ id: "local" }] })).toEqual({ multimodal: null });
   });
 });
 

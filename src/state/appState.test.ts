@@ -6,6 +6,7 @@ import {
   buildSettingsSnapshot,
   mergeScannedModels,
   pickSelectedModelPath,
+  reconcileMmprojPathForModel,
   removeDirectoryModels,
 } from "./appState";
 
@@ -51,6 +52,25 @@ describe("app state helpers", () => {
     expect(pickSelectedModelPath(models, "/missing.gguf")).toBe("/models/a/model-a.gguf");
   });
 
+  it("auto-selects the only mmproj candidate for a newly selected model", () => {
+    const model = {
+      ...baseModel,
+      mmprojCandidates: ["/models/a/mmproj-model-a.gguf"],
+    };
+
+    expect(reconcileMmprojPathForModel(null, model)).toBe("/models/a/mmproj-model-a.gguf");
+  });
+
+  it("keeps a matching mmproj candidate and clears stale candidates", () => {
+    const model = {
+      ...baseModel,
+      mmprojCandidates: ["/models/a/mmproj-model-a.gguf", "/models/a/mmproj-F16.gguf"],
+    };
+
+    expect(reconcileMmprojPathForModel("/models/a/mmproj-F16.gguf", model)).toBe("/models/a/mmproj-F16.gguf");
+    expect(reconcileMmprojPathForModel("/models/b/mmproj-other.gguf", model)).toBeNull();
+  });
+
   it("builds a settings snapshot from the latest full UI state", () => {
     const directories: ModelDirectory[] = [
       { path: "/models/a", status: "ready" },
@@ -67,6 +87,7 @@ describe("app state helpers", () => {
       directories,
       binaryPath: "/bin/llama-server",
       profileId: "custom",
+      parameterPresetSourceId: "user:precise",
       selectedModelPath: "/models/a/model-a.gguf",
       port: 9090,
       startupParameters: parameters,
@@ -77,6 +98,7 @@ describe("app state helpers", () => {
       schemaVersion: 2,
       modelDirectories: ["/models/a"],
       llamaServerPath: "/bin/llama-server",
+      parameterPresetSourceId: "user:precise",
       defaultPort: 9090,
       idleSleepSeconds: 30,
     });

@@ -3,6 +3,11 @@ import type { MutableRefObject } from "react";
 import { loadSettings, resolveLlamaServerPath } from "../api/tauri";
 import { getProfileById } from "../lib/parameterSchema";
 import {
+  MODEL_FAMILY_AUTO_PRESET_SOURCE_ID,
+  normalizeParameterPresetSourceId,
+  type ParameterPresetSourceId,
+} from "../lib/parameterPresets";
+import {
   emptyPrometheusHintsConfig,
   type ModelDirectory,
   type ModelEntry,
@@ -20,6 +25,7 @@ export interface AppBootstrapOptions {
   setBinaryPath: (path: string | null) => void;
   setPort: (port: number) => void;
   setProfileId: (id: ParameterProfile["id"]) => void;
+  setParameterPresetSourceId: (id: ParameterPresetSourceId) => void;
   setStartupParameters: Dispatch<SetStateAction<StartupParameters>>;
   setDirectories: (dirs: ModelDirectory[]) => void;
   setModels: (models: ModelEntry[]) => void;
@@ -35,6 +41,7 @@ export function useAppBootstrap({
   setBinaryPath,
   setPort,
   setProfileId,
+  setParameterPresetSourceId,
   setStartupParameters,
   setDirectories,
   setModels,
@@ -56,6 +63,9 @@ export function useAppBootstrap({
         setPrometheusHints(settings.prometheusHints ?? emptyPrometheusHintsConfig());
         const loadedProfile = getProfileById(settings.defaultPresetId || "max-capability");
         setProfileId(loadedProfile.id);
+        setParameterPresetSourceId(
+          normalizeParameterPresetSourceId(settings.parameterPresetSourceId ?? MODEL_FAMILY_AUTO_PRESET_SOURCE_ID),
+        );
         setStartupParameters({
           ...loadedProfile.parameters,
           idleSleepSeconds: settings.idleSleepSeconds,
@@ -89,6 +99,7 @@ export function useAppBootstrap({
     setModels,
     setPort,
     setProfileId,
+    setParameterPresetSourceId,
     setPrometheusHints,
     setSelectedModelPath,
     setStartupParameters,

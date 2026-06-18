@@ -1,5 +1,5 @@
-import { Copy } from "lucide-react";
-import { useCallback, useRef, type ReactNode } from "react";
+import { Copy, Check } from "lucide-react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize from "rehype-sanitize";
@@ -29,17 +29,20 @@ export function MarkdownContent({ text }: { text: string }): ReactNode {
 
 function PreWithToolbar({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
   const copy = useCallback(async () => {
     const root = ref.current;
     const code = root?.querySelector("code");
     const text = (code?.textContent ?? root?.textContent ?? "").replace(/\n+$/, "");
     await navigator.clipboard?.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }, []);
 
   return (
     <pre ref={ref} className="md-code-block">
       <button className="md-copy-btn" type="button" aria-label="复制代码" onClick={() => void copy()}>
-        <Copy size={12} />
+        {copied ? <Check size={12} className="copy-success-icon" /> : <Copy size={12} />}
       </button>
       {children}
     </pre>

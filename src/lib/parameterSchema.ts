@@ -21,7 +21,6 @@ export const defaultSampling: SamplingParameters = {
 
 export const DEFAULT_CUSTOM_CONTEXT_SIZE = 8192;
 export const FALLBACK_MAX_CONTEXT_SIZE = 32768;
-export const MAX_CONTEXT_SIZE = 131072;
 
 const customParameters: StartupParameters = {
   ctxSize: DEFAULT_CUSTOM_CONTEXT_SIZE,
@@ -73,11 +72,11 @@ export function resolveModelContextLimit(modelContextLength: number | null | und
   if (!Number.isFinite(modelContextLength) || !modelContextLength || modelContextLength <= 0) {
     return FALLBACK_MAX_CONTEXT_SIZE;
   }
-  return clampToStep(modelContextLength, 1024, MAX_CONTEXT_SIZE, 1024);
+  return Math.max(1, Math.floor(modelContextLength));
 }
 
 export function calculateMaxOutputTokens(ctxSize: number): number {
-  const safeCtx = clampToStep(ctxSize, 512, MAX_CONTEXT_SIZE, 1);
+  const safeCtx = Number.isFinite(ctxSize) && ctxSize > 0 ? Math.floor(ctxSize) : FALLBACK_MAX_CONTEXT_SIZE;
   const reserve = Math.max(256, Math.ceil(safeCtx * 0.08));
   return clampToStep(safeCtx - reserve, 64, Math.max(64, safeCtx - 1), 64);
 }
@@ -212,9 +211,7 @@ export function buildCommandPreview(config: LaunchConfig): string[] {
     String(config.parameters.ubatchSize),
   ];
 
-  if (config.parameters.flashAttention === "on") {
-    args.push("--flash-attn");
-  }
+  args.push("--flash-attn", config.parameters.flashAttention);
 
   args.push(config.parameters.mmap ? "--mmap" : "--no-mmap");
 

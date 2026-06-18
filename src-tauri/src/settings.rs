@@ -21,6 +21,8 @@ pub struct AppSettings {
     pub model_directories: Vec<String>,
     pub llama_server_path: Option<String>,
     pub default_preset_id: String,
+    #[serde(default = "default_parameter_preset_source_id")]
+    pub parameter_preset_source_id: String,
     pub last_selected_model_path: Option<String>,
     pub auto_port: bool,
     pub default_port: u16,
@@ -42,6 +44,7 @@ pub fn default_settings() -> AppSettings {
         llama_server_path: detect_default_llama_server_path()
             .map(|path| path.to_string_lossy().to_string()),
         default_preset_id: "max-capability".to_string(),
+        parameter_preset_source_id: default_parameter_preset_source_id(),
         last_selected_model_path: None,
         auto_port: true,
         default_port: 8080,
@@ -103,7 +106,16 @@ fn migrate_settings(mut settings: AppSettings) -> AppSettings {
         "low-memory" | "balanced" | "performance" => "custom".to_string(),
         _ => "max-capability".to_string(),
     };
+    settings.parameter_preset_source_id = match settings.parameter_preset_source_id.as_str() {
+        "model-family:auto" | "user:balanced" | "user:precise" | "user:creative"
+        | "user:low-memory" => settings.parameter_preset_source_id.clone(),
+        _ => default_parameter_preset_source_id(),
+    };
     settings
+}
+
+fn default_parameter_preset_source_id() -> String {
+    "model-family:auto".to_string()
 }
 
 /// Platform-aware binary name for llama-server.
