@@ -4,7 +4,7 @@ iLlama 是一个面向 Windows/macOS 的轻量 llama.cpp 可视化启动器。V3
 
 ## 当前状态
 
-iLlama v3.0.0：Tauri v2 + React + TypeScript + Rust，专注本地 GGUF 模型启动、监控和外部客户端连接。
+iLlama v3.1.0：Tauri v2 + React + TypeScript + Rust，专注本地 GGUF 模型启动、监控和外部客户端连接。
 
 核心能力：
 

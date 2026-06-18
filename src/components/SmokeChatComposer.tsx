@@ -155,6 +155,10 @@ export function SmokeChatComposer({
   }
 
   async function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
+    if (disabled || streaming) {
+      event.target.value = "";
+      return;
+    }
     const files = Array.from(event.target.files ?? []);
     await addFilesFromList(files);
     if (fileInputRef.current) {
@@ -296,6 +300,7 @@ export function SmokeChatComposer({
             className="visually-hidden"
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.rs,.py,text/plain,application/json"
+            disabled={disabled || streaming}
             multiple
             onChange={handleFileSelection}
           />

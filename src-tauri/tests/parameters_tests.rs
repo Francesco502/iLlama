@@ -53,10 +53,28 @@ fn builds_balanced_command_args() {
             "1024",
             "--ubatch-size",
             "256",
+            "--flash-attn",
+            "auto",
             "--mmap",
             "--metrics",
         ]
     );
+}
+
+#[test]
+fn passes_explicit_flash_attention_modes() {
+    let mut config = base_config();
+    config.parameters.flash_attention = FlashAttentionSetting::Off;
+    let off_args = build_command_args(&config);
+    assert!(off_args
+        .windows(2)
+        .any(|pair| pair == ["--flash-attn", "off"]));
+
+    config.parameters.flash_attention = FlashAttentionSetting::On;
+    let on_args = build_command_args(&config);
+    assert!(on_args
+        .windows(2)
+        .any(|pair| pair == ["--flash-attn", "on"]));
 }
 
 #[test]

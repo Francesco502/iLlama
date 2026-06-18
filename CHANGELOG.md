@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.1.0 - 2026-06-18
+
+### Added
+
+- Add multimodal projector workflow improvements: same-directory `mmproj` candidates, automatic single-candidate selection, explicit projector status, and runtime capability preflight before sending image requests.
+- Show sent image/text attachments in the smoke-test message thread so multimodal requests have visible confirmation.
+- Add focused tests for multimodal request serialization, projector capability checks, `mmproj` selection, attachment UI state, and image attachment replay.
+
+### Fixed
+
+- Disable every attachment entry point while the runtime is unavailable or streaming.
+- Keep the bottom status bar on one line on narrow screens by scrolling horizontally instead of wrapping metric labels.
+
 ## v3.0.0 - 2026-05-15
 
 ### Changed

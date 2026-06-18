@@ -58,7 +58,37 @@ pub fn scan_model_directory(path: &Path) -> io::Result<Vec<ModelEntry>> {
 
     for path in model_paths {
         let candidates = mmproj_candidates_for_model(&path, &mmproj_paths);
-        models.push(read_model_entry(&root, &path, candidates)?);
+        match read_model_entry(&root, &path, candidates.clone()) {
+            Ok(entry) => models.push(entry),
+            Err(error) => {
+                let file_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("model.gguf")
+                    .to_string();
+                let directory = parent_or_root(&path, &root).to_string_lossy().to_string();
+
+                models.push(ModelEntry {
+                    path: path.to_string_lossy().to_string(),
+                    file_name,
+                    directory,
+                    size_bytes: fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+                    modified_at: fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .map(chrono::DateTime::<chrono::Utc>::from)
+                        .unwrap_or_else(|_| chrono::Utc::now())
+                        .to_rfc3339(),
+                    architecture: None,
+                    quantization: None,
+                    context_length: None,
+                    parameter_count: None,
+                    metadata_status: MetadataStatus::Unreadable,
+                    metadata_error: Some(error.to_string()),
+                    available: false,
+                    mmproj_candidates: candidates,
+                });
+            }
+        }
     }
 
     models.sort_by(|left, right| left.file_name.cmp(&right.file_name));

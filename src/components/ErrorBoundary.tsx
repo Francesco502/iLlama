@@ -64,8 +64,8 @@ export class ErrorBoundary extends Component<Props, State> {
             gap: "12px",
             padding: "40px",
             fontFamily: "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-            color: "#1d1d1f",
-            background: "#f5f5f7",
+            color: "var(--text)",
+            background: "var(--bg-color)",
           }}
         >
           <h2 style={{ fontSize: "18px", fontWeight: 600, margin: 0 }}>应用发生了错误</h2>

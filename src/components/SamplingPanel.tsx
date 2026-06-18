@@ -1,4 +1,4 @@
-import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, HelpCircle } from "lucide-react";
 import { useState } from "react";
 import { getAdaptiveSafetyFactor } from "../lib/contextBudget";
 import { calculateMaxOutputTokens } from "../lib/parameterSchema";
@@ -9,6 +9,20 @@ interface SamplingPanelProps {
   sampling: SamplingParameters;
   ctxSize: number;
   onSamplingChange: (sampling: SamplingParameters) => void;
+}
+
+function FieldLabel({ label, tooltip }: { label: string; tooltip?: string }) {
+  if (!tooltip) {
+    return <span>{label}</span>;
+  }
+  return (
+    <span className="field-label-container">
+      <span>{label}</span>
+      <span className="tooltip-wrapper" data-tooltip={tooltip} onClick={(e) => e.stopPropagation()}>
+        <HelpCircle size={12} className="tooltip-icon" />
+      </span>
+    </span>
+  );
 }
 
 export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChange }: SamplingPanelProps) {
@@ -58,6 +72,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
           onChange={(v) => update("temperature", v)}
           min={0}
           step={0.05}
+          tooltip="控制生成文本的随机性与创造性。值越高越有创意，值为 0 时输出最确定。"
         />
         <NumberField
           label="top-p"
@@ -66,6 +81,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
           min={0}
           max={1}
           step={0.05}
+          tooltip="核采样参数。仅保留概率累加达到该比例的候选词，例如 0.9 表示只从累计概率占 90% 的候选词中采样。"
         />
       </div>
 
@@ -88,6 +104,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
             onChange={(v) => update("topK", v)}
             min={0}
             step={1}
+            tooltip="仅保留概率最高的前 K 个候选词进行采样。设置为 0 表示不限制。"
           />
           <NumberField
             label="min-p"
@@ -96,6 +113,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
             min={0}
             max={1}
             step={0.01}
+            tooltip="最小概率阈值截断。从候选词中排除概率低于最可能词一定比例的词，有助于在保持创造力的同时过滤无关词。"
           />
           <NumberField
             label="重复惩罚（repeat-penalty）"
@@ -103,6 +121,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
             onChange={(v) => update("repeatPenalty", v)}
             min={0}
             step={0.05}
+            tooltip="对已生成的词进行惩罚以减少复读。大于 1.0 时惩罚生效，通常设在 1.1 到 1.5 之间。"
           />
           <NumberField
             label="重复惩罚窗口（repeat-last-n）"
@@ -110,9 +129,10 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
             onChange={(v) => update("repeatLastN", v)}
             min={0}
             step={1}
+            tooltip="应用重复惩罚时所考虑的历史 Token 数量。"
           />
           <label className="field">
-            <span>随机种子（seed，留空为随机）</span>
+            <FieldLabel label="随机种子（seed，留空为随机）" tooltip="指定随机数种子以获得可重复的输出结果。留空为随机。" />
             <input
               inputMode="numeric"
               onChange={(event) => {
@@ -129,7 +149,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
             />
           </label>
           <label className="field field-wide">
-            <span>停用序列（每行一个，stop）</span>
+            <FieldLabel label="停用序列（每行一个，stop）" tooltip="遇到这些停用词序列时立即停止生成。每行输入一个。" />
             <textarea
               rows={3}
               spellCheck={false}
@@ -214,6 +234,7 @@ function NumberField({
   min,
   max,
   step,
+  tooltip,
 }: {
   label: string;
   value: number;
@@ -221,10 +242,11 @@ function NumberField({
   min?: number;
   max?: number;
   step?: number;
+  tooltip?: string;
 }) {
   return (
     <label className="field">
-      <span>{label}</span>
+      <FieldLabel label={label} tooltip={tooltip} />
       <input
         inputMode="decimal"
         max={max}

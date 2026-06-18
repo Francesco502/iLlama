@@ -37,6 +37,10 @@ export interface ChatCompletionMessage {
   finishReason?: string | null;
 }
 
+export interface RuntimeCapabilities {
+  multimodal: boolean | null;
+}
+
 interface ChatCompletionOptions {
   host: string;
   port: number;
@@ -59,6 +63,8 @@ export async function streamChatCompletion({
   onToken,
   onDelta,
 }: StreamChatOptions): Promise<void> {
+  await assertImageInputSupported({ host, port, messages, signal });
+
   const response = await fetch(`http://${host}:${port}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -120,6 +126,8 @@ export async function completeChatCompletion({
   sampling,
   signal,
 }: ChatCompletionOptions): Promise<ChatCompletionMessage> {
+  await assertImageInputSupported({ host, port, messages, signal });
+
   const response = await fetch(`http://${host}:${port}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -158,6 +166,176 @@ export function buildChatCompletionBody({
     max_tokens: sampling.maxTokens,
     stop: sampling.stop.length > 0 ? sampling.stop : undefined,
   };
+}
+
+async function assertImageInputSupported({
+  host,
+  port,
+  messages,
+  signal,
+}: Pick<ChatCompletionOptions, "host" | "port" | "messages" | "signal">): Promise<void> {
+  if (!hasImageAttachments(messages)) {
+    return;
+  }
+
+  const capabilities = await fetchRuntimeCapabilities(host, port, signal);
+  if (capabilities.multimodal === false) {
+    throw new Error("当前 llama-server 未启用多模态能力；请为视觉模型选择对应的 mmproj projector 后重启。");
+  }
+}
+
+function hasImageAttachments(messages: ChatRequestMessage[]): boolean {
+  return messages.some((message) =>
+    (message.attachments ?? []).some(
+      (attachment) =>
+        attachment.dataUrl.length > 0 && attachment.mimeType.toLowerCase().startsWith("image/"),
+    ),
+  );
+}
+
+async function fetchRuntimeCapabilities(
+  host: string,
+  port: number,
+  signal?: AbortSignal,
+): Promise<RuntimeCapabilities> {
+  try {
+    const response = await fetch(`http://${host}:${port}/v1/models`, { signal });
+    if (!response.ok) {
+      return { multimodal: null };
+    }
+    return parseRuntimeCapabilities(await response.json());
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return { multimodal: null };
+  }
+}
+
+export function parseRuntimeCapabilities(payload: unknown): RuntimeCapabilities {
+  const models = isRecord(payload) && Array.isArray(payload.data) ? payload.data : [payload];
+  let sawTextOnlyCapabilities = false;
+
+  for (const model of models) {
+    const detected = detectModelMultimodalCapability(model);
+    if (detected === true) {
+      return { multimodal: true };
+    }
+    if (detected === false) {
+      sawTextOnlyCapabilities = true;
+    }
+  }
+
+  return { multimodal: sawTextOnlyCapabilities ? false : null };
+}
+
+function detectModelMultimodalCapability(model: unknown): boolean | null {
+  if (!isRecord(model)) {
+    return null;
+  }
+
+  const direct = detectBooleanCapabilityFields(model);
+  if (direct !== null) {
+    return direct;
+  }
+
+  for (const key of ["capabilities", "modalities", "features"]) {
+    if (key in model) {
+      const detected = inspectCapabilityValue(model[key], true);
+      if (detected !== null) {
+        return detected;
+      }
+    }
+  }
+
+  for (const key of ["meta", "metadata"]) {
+    if (key in model) {
+      const detected = detectModelMultimodalCapability(model[key]);
+      if (detected !== null) {
+        return detected;
+      }
+    }
+  }
+
+  return null;
+}
+
+function inspectCapabilityValue(value: unknown, textOnlyIfKnown: boolean): boolean | null {
+  if (Array.isArray(value)) {
+    const normalized = value.filter((item): item is string => typeof item === "string").map(normalizeCapability);
+    if (normalized.some(isMultimodalCapabilityName)) {
+      return true;
+    }
+    return textOnlyIfKnown && normalized.length > 0 ? false : null;
+  }
+
+  if (typeof value === "string") {
+    return isMultimodalCapabilityName(normalizeCapability(value))
+      ? true
+      : textOnlyIfKnown
+        ? false
+        : null;
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const direct = detectBooleanCapabilityFields(value);
+  if (direct !== null) {
+    return direct;
+  }
+
+  for (const key of ["capabilities", "modalities", "features"]) {
+    if (key in value) {
+      const detected = inspectCapabilityValue(value[key], true);
+      if (detected !== null) {
+        return detected;
+      }
+    }
+  }
+
+  return textOnlyIfKnown && Object.keys(value).length > 0 ? false : null;
+}
+
+function detectBooleanCapabilityFields(value: Record<string, unknown>): boolean | null {
+  let sawExplicitFalse = false;
+  for (const [key, raw] of Object.entries(value)) {
+    const normalizedKey = normalizeCapability(key);
+    if (!isMultimodalCapabilityName(normalizedKey)) {
+      continue;
+    }
+    if (raw === true) {
+      return true;
+    }
+    if (raw === false) {
+      sawExplicitFalse = true;
+    }
+  }
+  return sawExplicitFalse ? false : null;
+}
+
+function normalizeCapability(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function isMultimodalCapabilityName(value: string): boolean {
+  return (
+    value === "multimodal" ||
+    value === "vision" ||
+    value === "image" ||
+    value === "images" ||
+    value === "image_input" ||
+    value === "input_image"
+  );
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof DOMException && error.name === "AbortError"
+  ) || (
+    error instanceof Error && error.name === "AbortError"
+  );
 }
 
 function buildMessageContent(message: ChatRequestMessage): string | ChatContentPart[] {

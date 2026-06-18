@@ -6,11 +6,13 @@ import type {
   PrometheusHintsConfig,
   StartupParameters,
 } from "../types/domain";
+import type { ParameterPresetSourceId } from "../lib/parameterPresets";
 
 interface SettingsSnapshotInput {
   directories: ModelDirectory[];
   binaryPath: string | null;
   profileId: ParameterProfile["id"];
+  parameterPresetSourceId: ParameterPresetSourceId;
   selectedModelPath: string | null;
   port: number;
   startupParameters: StartupParameters;
@@ -39,10 +41,25 @@ export function pickSelectedModelPath(
   return models[0]?.path ?? null;
 }
 
+export function reconcileMmprojPathForModel(
+  currentMmprojPath: string | null,
+  selectedModel: ModelEntry | null,
+): string | null {
+  const candidates = selectedModel?.mmprojCandidates ?? [];
+  if (currentMmprojPath && candidates.includes(currentMmprojPath)) {
+    return currentMmprojPath;
+  }
+  if (candidates.length === 1) {
+    return candidates[0] ?? null;
+  }
+  return null;
+}
+
 export function buildSettingsSnapshot({
   directories,
   binaryPath,
   profileId,
+  parameterPresetSourceId,
   selectedModelPath,
   port,
   startupParameters,
@@ -55,6 +72,7 @@ export function buildSettingsSnapshot({
       .map((directory) => directory.path),
     llamaServerPath: binaryPath,
     defaultPresetId: profileId,
+    parameterPresetSourceId,
     lastSelectedModelPath: selectedModelPath,
     autoPort: true,
     defaultPort: port,

@@ -34,7 +34,13 @@ export function ModelDirectoryPicker({
           <FolderOpen size={15} />
           选择模型目录
         </button>
-        <button className="icon-button" type="button" aria-label="刷新模型列表" onClick={onRefresh}>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="刷新模型列表"
+          title="刷新模型列表 (⌘R / Ctrl+R)"
+          onClick={onRefresh}
+        >
           <RefreshCw size={15} className={scanning ? "spin" : undefined} />
           <span>{scanning ? "扫描" : "刷新"}</span>
         </button>

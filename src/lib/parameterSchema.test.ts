@@ -58,9 +58,25 @@ describe("parameter schema", () => {
       "1024",
       "--ubatch-size",
       "256",
+      "--flash-attn",
+      "auto",
       "--mmap",
       "--metrics",
     ]);
+  });
+
+  it("passes explicit flash attention modes to llama-server", () => {
+    const offPreview = buildCommandPreview({
+      ...baseConfig,
+      parameters: { ...baseConfig.parameters, flashAttention: "off" },
+    });
+    const onPreview = buildCommandPreview({
+      ...baseConfig,
+      parameters: { ...baseConfig.parameters, flashAttention: "on" },
+    });
+
+    expect(offPreview).toEqual(expect.arrayContaining(["--flash-attn", "off"]));
+    expect(onPreview).toEqual(expect.arrayContaining(["--flash-attn", "on"]));
   });
 
   it("includes a selected multimodal projector in the command preview", () => {
@@ -123,6 +139,25 @@ describe("parameter schema", () => {
     expect(parameters.ubatchSize).toBe(512);
     expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(65_536));
     expect(sampling.maxTokens).toBeLessThan(65_536);
+  });
+
+  it("uses the full 256k model context in maximum capability mode", () => {
+    const parameters = buildMaxCapabilityStartupParameters(262_144, baseConfig.parameters);
+    const sampling = buildMaxCapabilitySampling(parameters.ctxSize, defaultSampling());
+
+    expect(parameters.ctxSize).toBe(262_144);
+    expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(262_144));
+    expect(sampling.maxTokens).toBeLessThan(262_144);
+  });
+
+  it("does not impose a fixed app ceiling when model metadata reports a larger context", () => {
+    const parameters = buildMaxCapabilityStartupParameters(524_288, baseConfig.parameters);
+    const sampling = buildMaxCapabilitySampling(parameters.ctxSize, defaultSampling());
+
+    expect(parameters.ctxSize).toBe(524_288);
+    expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(524_288));
+    expect(sampling.maxTokens).toBeGreaterThan(calculateMaxOutputTokens(262_144));
+    expect(sampling.maxTokens).toBeLessThan(524_288);
   });
 });
 
