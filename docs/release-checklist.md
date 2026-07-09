@@ -22,7 +22,7 @@ Current release target: `v3.1.0`.
 - [x] `docs/client-compatibility.md` exists with client field names and validation gates
 - [x] `docs/releases/v3.1.0.md` exists as the release-body source for GitHub Release automation
 - [x] GitHub Actions workflow defaults point at `v3.1.0`
-- [x] GitHub CI run `27733858954` passed on Ubuntu, macOS, and Windows after the cross-platform Rust compile fix
+- [x] GitHub CI run `28991492537` passed on Ubuntu, macOS, and Windows after the workspace cleanup and workflow action update
 - [ ] Fill `docs/client-compatibility.md` with actual tested versions before a signed public release
 
 ## Automated Verification
