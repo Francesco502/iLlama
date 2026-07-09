@@ -20,6 +20,9 @@ Current release target: `v3.1.0`.
 - [x] Smoke-test chat timestamps use wall-clock ISO timestamps, not `performance.now()` values
 - [x] V2 history has a legacy JSON export entry
 - [x] `docs/client-compatibility.md` exists with client field names and validation gates
+- [x] `docs/releases/v3.1.0.md` exists as the release-body source for GitHub Release automation
+- [x] GitHub Actions workflow defaults point at `v3.1.0`
+- [x] GitHub CI run `27733858954` passed on Ubuntu, macOS, and Windows after the cross-platform Rust compile fix
 - [ ] Fill `docs/client-compatibility.md` with actual tested versions before a signed public release
 
 ## Automated Verification
@@ -27,9 +30,9 @@ Current release target: `v3.1.0`.
 - [x] `npm test`
 - [x] `npm run lint`
 - [x] `npm run build`
-- [x] `PATH="$HOME/.cargo/bin:$PATH" cargo test --manifest-path src-tauri/Cargo.toml`
-- [x] `PATH="$HOME/.cargo/bin:$PATH" cargo fmt --check --manifest-path src-tauri/Cargo.toml`
-- [x] `PATH="$HOME/.cargo/bin:$PATH" cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+- [x] `cargo test`
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --all-targets --all-features -- -D warnings`
 - [x] Confirm `src-tauri/binaries/` contains no release sidecar except `.gitkeep`
 - [x] `ILLLAMA_UNSIGNED_RELEASE=1 npm run release:macos` for unsigned local artifact validation
 
@@ -47,7 +50,7 @@ Signing/notarization status carried forward from 2026-05-13: trusted notarized r
 
 - [ ] Add a model directory containing at least one `.gguf`
 - [ ] Select model
-- [ ] Verify Balanced preset command preview
+- [ ] Verify maximum-capability and custom command previews
 - [ ] Start with a valid `llama-server`
 - [ ] Confirm logs appear
 - [ ] Confirm local health status
@@ -60,9 +63,9 @@ Signing/notarization status carried forward from 2026-05-13: trusted notarized r
 
 ## Windows
 
-- [ ] `npm test`
-- [ ] `npm run build`
-- [ ] `PATH="$HOME/.cargo/bin:$PATH" cargo test --manifest-path src-tauri/Cargo.toml`
+- [x] `npm test` in GitHub CI
+- [x] `npm run build` in GitHub CI
+- [x] `cargo test` in GitHub CI
 - [ ] `npm run tauri:build`
 - [ ] Open generated installer/app
 - [ ] Repeat launch/connect/test/stop flow with a Windows `llama-server.exe`

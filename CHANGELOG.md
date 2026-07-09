@@ -12,6 +12,8 @@
 
 - Disable every attachment entry point while the runtime is unavailable or streaming.
 - Keep the bottom status bar on one line on narrow screens by scrolling horizontally instead of wrapping metric labels.
+- Compile the macOS Dock reopen handler only on macOS so Ubuntu and Windows Rust CI builds pass.
+- Add the v3.1.0 release notes source file and align workflow/documentation defaults with the current release.
 
 ## v3.0.0 - 2026-05-15
 

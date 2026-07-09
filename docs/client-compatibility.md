@@ -12,7 +12,7 @@ Chat Completions: http://127.0.0.1:<port>/v1/chat/completions
 Models: http://127.0.0.1:<port>/v1/models
 ```
 
-## V3.0.0 Profile Matrix
+## V3.1.0 Profile Matrix
 
 | Client | Profile field names | Tested version | Config path | Streaming | Images | Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -31,4 +31,4 @@ Models: http://127.0.0.1:<port>/v1/models
 5. If the client supports image input, repeat with a model + `mmproj` capable of vision requests.
 6. Record the client version, platform, config path, streaming result, image result, and any field-name mismatch.
 
-Do not mark a row as validated unless it was tested against a locally running iLlama V3 build and the exact client version is recorded.
+Do not mark a row as validated unless it was tested against a locally running iLlama v3.1.0 build and the exact client version is recorded.

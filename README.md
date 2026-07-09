@@ -1,6 +1,6 @@
 # iLlama
 
-iLlama 是一个面向 Windows/macOS 的轻量 llama.cpp 可视化启动器。V3.0.0 起，iLlama 回到 launcher-first 定位：负责扫描本地 GGUF、配置并启动 `llama-server`、展示运行状态和日志，然后把 OpenAI-compatible 连接信息交给 Chatbox、Cherry Studio、Open WebUI、AnythingLLM 或其他聊天客户端。
+iLlama 是一个面向 Windows/macOS 的轻量 llama.cpp 可视化启动器。当前 v3.1.0 延续 V3.0.0 起的 launcher-first 定位：负责扫描本地 GGUF、配置并启动 `llama-server`、展示运行状态和日志，然后把 OpenAI-compatible 连接信息交给 Chatbox、Cherry Studio、Open WebUI、AnythingLLM 或其他聊天客户端。
 
 ## 当前状态
 
