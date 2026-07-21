@@ -27,12 +27,13 @@ function renderLayout(options?: { runtimeStatus?: "idle" | "failed"; canStop?: b
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 
   function Host() {
+    const [activeTab, setActiveTab] = useState<"run" | "connect" | "test">("run");
     const [logOpen, setLogOpen] = useState(false);
     const [logHeight, setLogHeight] = useState(180);
     return (
       <AppLayout
-        activeTab="run"
-        onTabChange={vi.fn()}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         sidebar={<div>模型列表</div>}
         runContent={<div>运行内容</div>}
         connectionContent={<div>连接内容</div>}
@@ -115,5 +116,34 @@ describe("AppLayout", () => {
     renderLayout({ runtimeStatus: "failed", canStop: true });
 
     expect(screen.getByRole("button", { name: "停止" })).toBeEnabled();
+  });
+
+  it("restores an independent scroll position for each tab", () => {
+    renderLayout();
+    const panel = screen.getByRole("tabpanel");
+    panel.scrollTop = 140;
+
+    fireEvent.click(screen.getByRole("tab", { name: "连接" }));
+    expect(panel.scrollTop).toBe(0);
+    panel.scrollTop = 55;
+
+    fireEvent.click(screen.getByRole("tab", { name: "运行" }));
+    expect(panel.scrollTop).toBe(140);
+    fireEvent.click(screen.getByRole("tab", { name: "连接" }));
+    expect(panel.scrollTop).toBe(55);
+  });
+
+  it("focuses, closes and restores focus for the shortcuts dialog", () => {
+    renderLayout();
+    const trigger = screen.getByRole("button", { name: "查看快捷键" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("dialog", { name: "快捷键" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭" })).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "快捷键" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });

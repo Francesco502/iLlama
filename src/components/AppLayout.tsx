@@ -5,6 +5,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -73,6 +74,35 @@ export function AppLayout({
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
   const logResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const tabPanelRef = useRef<HTMLDivElement>(null);
+  const previousTabRef = useRef(activeTab);
+  const tabScrollPositionsRef = useRef<Record<AppTab, number>>({ run: 0, connect: 0, test: 0 });
+  const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
+  const shortcutsCloseRef = useRef<HTMLButtonElement>(null);
+  const shortcutsReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  const openShortcuts = useCallback(() => {
+    shortcutsReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : shortcutsTriggerRef.current;
+    setShortcutsOpen(true);
+  }, []);
+
+  const closeShortcuts = useCallback(() => {
+    setShortcutsOpen(false);
+    (shortcutsReturnFocusRef.current ?? shortcutsTriggerRef.current)?.focus();
+  }, []);
+
+  const selectTab = useCallback(
+    (tab: AppTab) => {
+      if (tab === activeTab) return;
+      const panel = tabPanelRef.current;
+      if (panel) tabScrollPositionsRef.current[activeTab] = panel.scrollTop;
+      onTabChange(tab);
+    },
+    [activeTab, onTabChange],
+  );
 
   const stopLogResize = useCallback(() => {
     logResizeRef.current = null;
@@ -138,6 +168,21 @@ export function AppLayout({
     }
   }, [logs, logOpen]);
 
+  useLayoutEffect(() => {
+    const panel = tabPanelRef.current;
+    if (!panel) return;
+    const previous = previousTabRef.current;
+    if (previous !== activeTab) {
+      tabScrollPositionsRef.current[previous] = panel.scrollTop;
+      panel.scrollTop = tabScrollPositionsRef.current[activeTab];
+      previousTabRef.current = activeTab;
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (shortcutsOpen) shortcutsCloseRef.current?.focus();
+  }, [shortcutsOpen]);
+
   useEffect(() => {
     return () => {
       window.removeEventListener("mousemove", handleLogResizeMove);
@@ -150,7 +195,7 @@ export function AppLayout({
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        if (shortcutsOpen) setShortcutsOpen(false);
+        if (shortcutsOpen) closeShortcuts();
         else if (logOpen) onLogOpenChange(false);
         return;
       }
@@ -160,24 +205,29 @@ export function AppLayout({
           target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
         if (isEditable) return;
         event.preventDefault();
-        setShortcutsOpen((value) => !value);
+        if (shortcutsOpen) closeShortcuts();
+        else openShortcuts();
       }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [logOpen, onLogOpenChange, shortcutsOpen]);
+  }, [closeShortcuts, logOpen, onLogOpenChange, openShortcuts, shortcutsOpen]);
 
   return (
     <>
       <div className="app-layout">
         <aside className="sidebar">{sidebar}</aside>
         <div className="main-content">
-          <div className="tab-bar">
+          <div className="tab-bar" role="tablist" aria-label="工作台页面">
             <button
               className="tab-button"
               type="button"
               data-active={activeTab === "run"}
-              onClick={() => onTabChange("run")}
+              id="tab-run"
+              role="tab"
+              aria-selected={activeTab === "run"}
+              aria-controls="workbench-panel"
+              onClick={() => selectTab("run")}
             >
               <Settings2 size={14} />
               运行
@@ -186,7 +236,11 @@ export function AppLayout({
               className="tab-button"
               type="button"
               data-active={activeTab === "connect"}
-              onClick={() => onTabChange("connect")}
+              id="tab-connect"
+              role="tab"
+              aria-selected={activeTab === "connect"}
+              aria-controls="workbench-panel"
+              onClick={() => selectTab("connect")}
             >
               <Link2 size={14} />
               连接
@@ -195,13 +249,23 @@ export function AppLayout({
               className="tab-button"
               type="button"
               data-active={activeTab === "test"}
-              onClick={() => onTabChange("test")}
+              id="tab-test"
+              role="tab"
+              aria-selected={activeTab === "test"}
+              aria-controls="workbench-panel"
+              onClick={() => selectTab("test")}
             >
               <FlaskConical size={14} />
               测试
             </button>
           </div>
-          <div className="tab-panel">
+          <div
+            className="tab-panel"
+            id="workbench-panel"
+            role="tabpanel"
+            aria-labelledby={`tab-${activeTab}`}
+            ref={tabPanelRef}
+          >
             {activeTab === "run" && runContent}
             {activeTab === "connect" && connectionContent}
             {activeTab === "test" && testContent}
@@ -332,7 +396,8 @@ export function AppLayout({
             type="button"
             aria-label="查看快捷键"
             title="快捷键（?）"
-            onClick={() => setShortcutsOpen(true)}
+            ref={shortcutsTriggerRef}
+            onClick={openShortcuts}
           >
             <HelpCircle size={12} />
           </button>
@@ -353,7 +418,13 @@ export function AppLayout({
           role="dialog"
           aria-modal="true"
           aria-label="快捷键"
-          onClick={() => setShortcutsOpen(false)}
+          onClick={closeShortcuts}
+          onKeyDown={(event) => {
+            if (event.key === "Tab") {
+              event.preventDefault();
+              shortcutsCloseRef.current?.focus();
+            }
+          }}
         >
           <div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}>
             <div className="shortcuts-header">
@@ -362,7 +433,8 @@ export function AppLayout({
                 type="button"
                 aria-label="关闭"
                 className="shortcuts-close"
-                onClick={() => setShortcutsOpen(false)}
+                ref={shortcutsCloseRef}
+                onClick={closeShortcuts}
               >
                 ×
               </button>
