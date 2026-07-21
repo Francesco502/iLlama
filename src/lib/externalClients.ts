@@ -101,7 +101,10 @@ export function buildRuntimeConnection(
     : "snapshot" in input
       ? input.draftModelName
       : input.modelName;
-  const healthy = "snapshot" in input ? input.snapshot.status === "healthy" : input.healthy;
+  const healthy =
+    "snapshot" in input
+      ? input.snapshot.status === "healthy" && active !== null
+      : input.healthy;
   const baseUrl = `http://127.0.0.1:${port}/v1`;
   return {
     host: "127.0.0.1",
@@ -140,10 +143,13 @@ export function buildExternalClientJson(connection: RuntimeConnection): string {
 
 export async function checkRuntimeConnection(
   connection: RuntimeConnection,
+  signal?: AbortSignal,
 ): Promise<RuntimeConnectionCheckResult> {
   const healthUrl = `http://${connection.host}:${connection.port}/health`;
-  const health = await fetchEndpoint(healthUrl);
-  const models = await fetchEndpoint(connection.modelsUrl);
+  const [health, models] = await Promise.all([
+    fetchEndpoint(healthUrl, 2_000, "Health 检测超过 2 秒未完成。", signal),
+    fetchEndpoint(connection.modelsUrl, 5_000, "Models 检测超过 5 秒未完成。", signal),
+  ]);
   const modelIds = extractModelIds(models.body);
   const healthOk = health.ok;
   const modelsOk = models.ok && modelIds.length > 0;
@@ -164,9 +170,15 @@ interface EndpointResult {
   body: unknown;
 }
 
-async function fetchEndpoint(url: string): Promise<EndpointResult> {
+async function fetchEndpoint(
+  url: string,
+  timeoutMs: number,
+  timeoutMessage: string,
+  parentSignal?: AbortSignal,
+): Promise<EndpointResult> {
+  const timed = createTimedSignal(parentSignal, timeoutMs, timeoutMessage);
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: timed.signal });
     let body: unknown = null;
     try {
       body = await response.json();
@@ -186,7 +198,31 @@ async function fetchEndpoint(url: string): Promise<EndpointResult> {
       error: error instanceof Error ? error.message : String(error),
       body: null,
     };
+  } finally {
+    timed.dispose();
   }
+}
+
+function createTimedSignal(
+  parent: AbortSignal | undefined,
+  timeoutMs: number,
+  message: string,
+): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parent?.reason);
+  if (parent?.aborted) abortFromParent();
+  else parent?.addEventListener("abort", abortFromParent, { once: true });
+  const timer = setTimeout(
+    () => controller.abort(new DOMException(message, "TimeoutError")),
+    timeoutMs,
+  );
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", abortFromParent);
+    },
+  };
 }
 
 function extractModelIds(body: unknown): string[] {

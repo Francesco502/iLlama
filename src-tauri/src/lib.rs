@@ -31,7 +31,6 @@ pub fn run() {
             commands::start_llama_command,
             commands::stop_llama_command,
             commands::runtime_snapshot_command,
-            commands::confirm_health_command,
             commands::check_health_command,
             commands::find_available_port_command,
             commands::set_tray_enabled_command,

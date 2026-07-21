@@ -173,10 +173,6 @@ export async function runtimeSnapshot(): Promise<RuntimeSnapshot> {
   return invoke<RuntimeSnapshot>("runtime_snapshot_command");
 }
 
-export async function confirmHealth(): Promise<void> {
-  await invoke("confirm_health_command");
-}
-
 export async function checkHealth(host: string, port: number): Promise<HealthStatus> {
   return invoke<HealthStatus>("check_health_command", { host, port });
 }

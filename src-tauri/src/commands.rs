@@ -158,11 +158,6 @@ pub async fn runtime_snapshot_command(
 }
 
 #[tauri::command]
-pub fn confirm_health_command(state: State<'_, LlamaProcessState>) {
-    state.confirm_health();
-}
-
-#[tauri::command]
 pub async fn check_health_command(host: String, port: u16) -> HealthStatus {
     check_http_health(&host, port, 500)
 }

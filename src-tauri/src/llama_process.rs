@@ -214,15 +214,6 @@ impl LlamaProcessState {
         }
     }
 
-    /// Mark the backend health as confirmed (called after frontend health check passes).
-    pub fn confirm_health(&self) {
-        if let Ok(mut state) = self.inner.lock() {
-            if state.child.is_some() {
-                state.health_confirmed = true;
-            }
-        }
-    }
-
     pub fn start(&self, config: LaunchConfig) -> Result<RuntimeSnapshot, String> {
         self.start_internal(config, None)
     }

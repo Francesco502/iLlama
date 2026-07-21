@@ -9,6 +9,7 @@ export type RuntimeSmokeMessage = ChatMessage;
 
 interface UseRuntimeSmokeChatOptions {
   port: number;
+  modelId: string | null;
   sampling: SamplingParameters;
   modelName: string | null;
   appendSystemLog: (message: string) => void;
@@ -16,6 +17,7 @@ interface UseRuntimeSmokeChatOptions {
 
 export function useRuntimeSmokeChat({
   port,
+  modelId,
   sampling,
   modelName,
   appendSystemLog,
@@ -41,6 +43,10 @@ export function useRuntimeSmokeChat({
     async (payload: PendingChatMessage) => {
       const text = payload.text.trim();
       if (streaming || (text.length === 0 && payload.attachments.length === 0)) {
+        return;
+      }
+      if (!modelId) {
+        appendSystemLog("当前服务尚未探测到可用模型 ID，无法发送测试请求。");
         return;
       }
 
@@ -94,6 +100,7 @@ export function useRuntimeSmokeChat({
         await streamChatCompletion({
           host: "127.0.0.1",
           port,
+          modelId,
           messages: requestMessages,
           sampling,
           signal: controller.signal,
@@ -138,7 +145,7 @@ export function useRuntimeSmokeChat({
         setStreaming(false);
       }
     },
-    [appendSystemLog, messages, modelName, port, sampling, streaming],
+    [appendSystemLog, messages, modelId, modelName, port, sampling, streaming],
   );
 
   return {

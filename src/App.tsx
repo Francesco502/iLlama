@@ -32,6 +32,7 @@ import {
   type ParameterPresetSourceId,
 } from "./lib/parameterPresets";
 import { buildRuntimeConnection } from "./lib/externalClients";
+import { getLaunchDraftChanges } from "./lib/launchDraft";
 import { demoModelDirectories, demoModels } from "./state/appStore";
 import {
   buildSettingsSnapshot,
@@ -135,6 +136,23 @@ export function App() {
     mergeLogs,
     onHealthy: () => setActiveTab("connect"),
   });
+
+  const launchDraft = useMemo(
+    () => ({
+      binaryPath,
+      modelPath: selectedModel?.path ?? selectedModelPath,
+      host: "127.0.0.1" as const,
+      port,
+      parameters: startupParameters,
+      prometheusHints,
+      autoPort,
+    }),
+    [autoPort, binaryPath, port, prometheusHints, selectedModel?.path, selectedModelPath, startupParameters],
+  );
+  const launchDraftChanges = useMemo(
+    () => getLaunchDraftChanges(launchDraft, runtimeSnapshot.activeLaunch),
+    [launchDraft, runtimeSnapshot.activeLaunch],
+  );
 
   const previewConfig = useMemo(
     () => ({
@@ -437,6 +455,18 @@ export function App() {
     await runLaunchTransaction(performStart);
   }
 
+  function restoreActiveLaunchToDraft() {
+    const active = runtimeSnapshot.activeLaunch;
+    if (!active) return;
+    setBinaryPath(active.binaryPath);
+    setSelectedModelPath(active.modelPath);
+    setPort(active.port);
+    setAutoPort(false);
+    setStartupParameters(active.parameters);
+    setPrometheusHints(active.prometheusHints);
+    appendSystemLog("已将草稿恢复为当前运行配置；自动端口已关闭以保留实际端口。");
+  }
+
   function handleSelectModel(path: string) {
     const nextModel = models.find((model) => model.path === path) ?? null;
     if (!getModelLaunchAssessment(nextModel).allowed) return;
@@ -521,6 +551,17 @@ export function App() {
         }
         runContent={
           <div className="config-view">
+            {runtimeSnapshot.activeLaunch && launchDraftChanges.length > 0 && (
+              <section className="runtime-draft-notice panel" aria-label="下次启动配置变更">
+                <div>
+                  <strong>当前草稿有 {launchDraftChanges.length} 项变更</strong>
+                  <p>这些变更只会在下次启动时生效；当前服务仍使用实际运行配置。</p>
+                </div>
+                <button className="ghost-button" type="button" onClick={restoreActiveLaunchToDraft}>
+                  恢复为当前运行配置
+                </button>
+              </section>
+            )}
             <section className="model-summary panel">
               <div>
                 <span className="eyebrow">已选择模型</span>
@@ -642,9 +683,7 @@ export function App() {
         }
         testContent={
           <RuntimeSmokeChat
-            runtimeStatus={runtimeStatus}
-            selectedModel={selectedModel}
-            port={port}
+            snapshot={runtimeSnapshot}
             sampling={sampling}
             appendSystemLog={appendSystemLog}
             onNavigateToRun={() => setActiveTab("run")}

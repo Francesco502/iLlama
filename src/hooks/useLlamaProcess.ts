@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isTauriRuntime,
   runtimeSnapshot as fetchRuntimeSnapshot,
@@ -46,6 +46,10 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
   const healthyNotifiedRef = useRef(false);
   const lastErrorRef = useRef<string | null>(null);
   const generationRef = useRef(0);
+  const appendSystemLogRef = useRef(appendSystemLog);
+  const applySnapshotRef = useRef<(next: RuntimeSnapshot) => void>(() => undefined);
+  const pollRuntimeRef = useRef<(generation: number) => Promise<void>>(async () => undefined);
+  appendSystemLogRef.current = appendSystemLog;
 
   const stopHealthPoll = useCallback(() => {
     generationRef.current += 1;
@@ -114,6 +118,43 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
       HEALTH_STARTUP_INITIAL_DELAY_MS,
     );
   }, [pollRuntime]);
+
+  applySnapshotRef.current = applySnapshot;
+  pollRuntimeRef.current = pollRuntime;
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const generation = generationRef.current;
+    let disposed = false;
+    void fetchRuntimeSnapshot()
+      .then((next) => {
+        if (disposed || generation !== generationRef.current) return;
+        applySnapshotRef.current(next);
+        if (next.pid !== null) {
+          nextStartupDelayRef.current = HEALTH_STARTUP_INITIAL_DELAY_MS;
+          pollTimerRef.current = setTimeout(
+            () => void pollRuntimeRef.current(generation),
+            HEALTH_STARTUP_INITIAL_DELAY_MS,
+          );
+        }
+      })
+      .catch((error) => {
+        if (disposed || generation !== generationRef.current) return;
+        appendSystemLogRef.current(
+          `恢复运行状态失败，将在下次操作时重试：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    return () => {
+      disposed = true;
+      generationRef.current += 1;
+      if (pollTimerRef.current !== null) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleStart = useCallback(
     async (config: LaunchConfig) => {

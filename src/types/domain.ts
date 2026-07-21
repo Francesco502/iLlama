@@ -99,6 +99,10 @@ export interface LaunchConfig {
   prometheusHints: PrometheusHintsConfig;
 }
 
+export interface DraftLaunchConfig extends LaunchConfig {
+  autoPort: boolean;
+}
+
 export interface ValidationResult {
   valid: boolean;
   errors: string[];

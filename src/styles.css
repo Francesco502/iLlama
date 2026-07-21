@@ -515,6 +515,19 @@ button { cursor: default; }
 .panel-title .ghost-button { margin-left: auto; }
 
 /* ─── Model Summary ─── */
+.runtime-draft-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+.runtime-draft-notice p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 .model-summary {
   display: flex;
   align-items: center;

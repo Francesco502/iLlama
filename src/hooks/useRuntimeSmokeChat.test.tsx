@@ -34,6 +34,7 @@ describe("useRuntimeSmokeChat", () => {
     const appendSystemLog = vi.fn();
     const { result } = renderHook(() =>
       useRuntimeSmokeChat({
+        modelId: "runtime-model-id",
         port: 9090,
         sampling: defaultSampling,
         modelName: "qwen.gguf",
@@ -49,6 +50,7 @@ describe("useRuntimeSmokeChat", () => {
       expect.objectContaining({
         host: "127.0.0.1",
         port: 9090,
+        modelId: "runtime-model-id",
         messages: [expect.objectContaining({ role: "user", content: "ping" })],
       }),
     );
@@ -71,6 +73,7 @@ describe("useRuntimeSmokeChat", () => {
     );
     const { result } = renderHook(() =>
       useRuntimeSmokeChat({
+        modelId: "runtime-model-id",
         port: 8080,
         sampling: defaultSampling,
         modelName: "qwen.gguf",
@@ -96,6 +99,7 @@ describe("useRuntimeSmokeChat", () => {
     });
     const { result } = renderHook(() =>
       useRuntimeSmokeChat({
+        modelId: "runtime-model-id",
         port: 8080,
         sampling: defaultSampling,
         modelName: "qwen.gguf",
@@ -121,6 +125,7 @@ describe("useRuntimeSmokeChat", () => {
     });
     const { result } = renderHook(() =>
       useRuntimeSmokeChat({
+        modelId: "runtime-model-id",
         port: 8080,
         sampling: defaultSampling,
         modelName: "qwen.gguf",

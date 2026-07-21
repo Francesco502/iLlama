@@ -78,6 +78,19 @@ describe("useLlamaProcess", () => {
 
   afterEach(() => vi.useRealTimers());
 
+  it("hydrates an already-running backend process on mount", async () => {
+    const { result } = renderHook(() =>
+      useLlamaProcess({ appendSystemLog: vi.fn(), mergeLogs: vi.fn() }),
+    );
+
+    await act(async () => Promise.resolve());
+
+    expect(runtimeSnapshot).toHaveBeenCalled();
+    expect(result.current.snapshot.pid).toBe(42);
+    expect(result.current.snapshot.activeLaunch?.modelPath).toBe("/models/a.gguf");
+    expect(result.current.canStop).toBe(true);
+  });
+
   it("exposes the backend active launch snapshot after starting", async () => {
     const { result } = renderHook(() =>
       useLlamaProcess({ appendSystemLog: vi.fn(), mergeLogs: vi.fn() }),

@@ -11,7 +11,7 @@ const COMPOSER_MAX_HEIGHT = 180;
 
 interface SmokeChatComposerProps {
   disabled: boolean;
-  disabledReason?: "runtime" | "conversation" | "streaming";
+  disabledReason?: "runtime" | "model" | "conversation" | "streaming";
   streaming: boolean;
   imagePersistence: ChatAttachmentPersistence;
   draftText?: string;
@@ -41,6 +41,8 @@ export function SmokeChatComposer({
   const placeholder = disabled
     ? disabledReason === "conversation"
       ? "正在准备新对话…"
+      : disabledReason === "model"
+        ? "等待服务返回可用模型 ID…"
       : disabledReason === "streaming"
         ? "正在生成，可停止后继续输入"
         : "启动模型后即可发送"

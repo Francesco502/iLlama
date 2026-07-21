@@ -92,6 +92,34 @@ describe("external client connection helpers", () => {
     expect(connection.source).toBe("active");
   });
 
+  it("does not report a healthy draft when no active launch exists", () => {
+    const snapshot: RuntimeSnapshot = {
+      status: "healthy",
+      pid: null,
+      startedAt: null,
+      activeModelPath: null,
+      activeLaunch: null,
+      lastError: null,
+      metrics: {
+        cpuPercent: null,
+        memoryBytes: null,
+        tokensPerSecond: null,
+        promptTokensPerSecond: null,
+        kvCacheUsageRatio: null,
+      },
+      logs: [],
+    };
+
+    const connection = buildRuntimeConnection({
+      snapshot,
+      draftPort: 9090,
+      draftModelName: "draft.gguf",
+    });
+
+    expect(connection.healthy).toBe(false);
+    expect(connection.source).toBe("draft");
+  });
+
   it("ships launcher-oriented profiles for common external clients", () => {
     expect(externalClientProfiles.map((profile) => profile.id)).toEqual([
       "chatbox",
@@ -141,5 +169,32 @@ describe("external client connection helpers", () => {
     expect(result.healthOk).toBe(true);
     expect(result.modelsOk).toBe(true);
     expect(result.models).toEqual(["local"]);
+  });
+
+  it("times out health after 2 seconds", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.endsWith("/health")) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          });
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: [{ id: "local" }] }), { status: 200 }),
+        );
+      }),
+    );
+
+    const pending = checkRuntimeConnection(
+      buildRuntimeConnection({ port: 8080, modelName: "local.gguf", healthy: true }),
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await pending;
+
+    expect(result.healthOk).toBe(false);
+    expect(result.message).toContain("2 秒");
+    vi.useRealTimers();
   });
 });
