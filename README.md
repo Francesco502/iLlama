@@ -1,22 +1,22 @@
 # iLlama
 
-iLlama 是一个面向 Windows/macOS 的轻量 llama.cpp 可视化启动器。当前 v3.1.0 延续 V3.0.0 起的 launcher-first 定位：负责扫描本地 GGUF、配置并启动 `llama-server`、展示运行状态和日志，然后把 OpenAI-compatible 连接信息交给 Chatbox、Cherry Studio、Open WebUI、AnythingLLM 或其他聊天客户端。
+iLlama 是一个轻量 llama.cpp 可视化启动器。v3.2.0 延续 launcher-first 定位：负责扫描本地 GGUF、配置并启动外置 `llama-server`、展示可信的实际运行状态和日志，再把 OpenAI-compatible 连接信息交给 Chatbox、Cherry Studio、Open WebUI、AnythingLLM 或其他聊天客户端。
 
 ## 当前状态
 
-iLlama v3.1.0：Tauri v2 + React + TypeScript + Rust，专注本地 GGUF 模型启动、监控和外部客户端连接。
+iLlama v3.2.0：正式发布目标仅为 macOS Apple Silicon。Windows 保持编译、测试与预览支持，但不提供 3.2.0 正式安装包。
 
 核心能力：
 
 - macOS 原生工具风格的三栏 UI 壳，支持窗口关闭（X 按钮）时自动隐藏至后台（Dock 栏中）运行，以及点击 Dock 图标重新显示并聚焦主窗口
 - 用户指定模型目录后，仅扫描该目录下的 GGUF 模型
-- GGUF header/metadata 轻量读取
+- GGUF 扫描分为 ready、limited 和 invalid；invalid 模型禁止启动，limited 模型带警告启动
 - `llama-server` 可执行文件自动发现与手动选择
 - 启动参数 schema、校验、预设和命令预览
-- 参数模式：最大能力 / 自定义
-- 最大能力模式会按模型 metadata 自动设置 `ctxSize`，并给内置测试聊天设置安全 `maxTokens`
+- 参数模式：自动配置 / 自定义
+- 自动配置按模型 metadata 设置 `ctxSize`，内置测试输出上限为 `max(256, min(2048, floor(ctxSize × 0.25)))`
 - 自定义模式提供上下文长度与输出最大长度滑杆
-- `llama-server` 子进程启动/停止 + 指数退避健康检查
+- `llama-server` 能力探测、共享命令规范、子进程启动/停止与健康检查
 - 自动端口避让
 - Prometheus runtime 指标读取：CPU、内存、Token/s、KV cache
 - `mmproj` projector 参数：同目录候选识别、手动选择、`--mmproj` / `--no-mmproj-offload`
@@ -26,7 +26,7 @@ iLlama v3.1.0：Tauri v2 + React + TypeScript + Rust，专注本地 GGUF 模型�
 - 连接检测：检查 `/health` 与 `/v1/models`
 - 临时测试聊天：仅用于 smoke test，不保存历史
 - V2 历史导出入口：仅用于迁移旧历史，不再写入新的聊天历史
-- 日志抽屉：按流过滤、全文搜索、一键清空
+- 可调整并持久化的底部日志 dock：按流过滤、全文搜索、一键清空
 - 健全的进程生命周期管理，在应用完全退出（Cmd+Q 或从 Dock 菜单退出）时，可靠地自动清理所有后台的 `llama-server` 进程，防止孤儿进程泄漏
 - macOS `.app` 和 `.dmg` 打包路径
 
@@ -49,15 +49,15 @@ iLlama 不再试图成为完整聊天应用。完整对话历史、分支、写�
 ```text
 Base URL: http://127.0.0.1:8080/v1
 API Key: llama
-Model: <当前模型文件名>
+Model: <运行时 /v1/models 返回的模型 ID>
 ```
 
-大多数 OpenAI-compatible 客户端的 API Key 可以填任意非空值；iLlama 默认给出 `llama`。如果客户端要求模型名，可先使用连接页显示的模型文件名；部分 `llama-server` 构建也接受 `local`。
+大多数 OpenAI-compatible 客户端的 API Key 可以填任意非空值；iLlama 默认给出 `llama`。模型名必须使用连接页显示的、由当前运行服务 `/v1/models` 探测到的模型 ID，不使用 GGUF 文件名或硬编码 `local` 替代。
 
 ## 用户向说明
 
 - **ctxSize**：与 `llama-server` 的上下文槽位一致；过大占用更多内存与 KV。
-- **最大能力**：按模型 metadata 拉满上下文，并把内置「测试」聊天的输出最大长度设到安全上限；这代表最大上下文能力，不保证最快。
+- **自动配置**：按模型 metadata 与设备能力选择启动参数，并为内置「测试」设置安全输出上限；它不保证绝对最快。
 - **自定义**：用滑杆调节上下文长度与输出最大长度。修改 `ctxSize` 后需要重启模型才会影响 `llama-server`。
 - **maxTokens**：单轮内置测试请求的输出上限；外部客户端通常也有自己的输出上限，iLlama 不会强行改写 Chatbox、Cherry Studio、Open WebUI 等客户端发送的 `max_tokens`。
 - **Prometheus 指标名子串**：若你的 `llama-server` 构建改过 metric 命名，可在「运行」→「Prometheus 指标名子串」里填逗号分隔的关键片段。
@@ -70,10 +70,10 @@ Model: <当前模型文件名>
 
 - 桌面框架：Tauri v2
 - 前端：React + TypeScript + Vite
-- UI 风格：macOS 原生工具型 split-view，系统字体，浅色主题，紧凑控件
+- UI 风格：macOS 原生工具型 split-view，系统字体，浅/暗色主题，紧凑控件
 - 后端：Rust
 - 推理运行时：外部 `llama-server`
-- 测试：Vitest + Cargo tests
+- 测试：Vitest + Playwright + axe + Cargo tests
 
 ## 开发环境
 
@@ -152,7 +152,17 @@ npm run prepare:sidecar -- /path/to/llama-server aarch64-apple-darwin
 src-tauri/binaries/
 ```
 
-当前 sidecar 与 macOS 分发策略记录在 `docs/release-strategy.md`。
+当前 sidecar 与 macOS 分发策略记录在 `docs/release-strategy.md`。正式包不会内置或下载 `llama-server`。
+
+## 3.2.0 发布边界
+
+- `v3.2.0-rc.1` 与 `v3.2.0` 只通过 GitHub Actions 的手动、受保护发布环境创建。
+- 正式 DMG 必须在 Apple Silicon runner 上完成 Developer ID 签名、Apple 公证、staple、Gatekeeper 检查和 SHA-256 校验。
+- 缺少任一签名或公证凭据会直接阻断发布，不会降级为未签名 Release。
+- unsigned 模式仅生成保留 7 天的手动 workflow artifact，不创建 GitHub Release。
+- 最终版还必须完成真实 GGUF 全链路、至少一个版本明确的外部客户端，以及干净 Apple Silicon Mac 验收。
+
+完整步骤见 [发布清单](docs/release-checklist.md) 和 [3.2.0 发布说明](docs/releases/v3.2.0.md)。
 
 ## 范围与非目标
 

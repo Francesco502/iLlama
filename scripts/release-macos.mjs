@@ -10,9 +10,11 @@ const version = packageJson.version;
 const cargoPath = `${join(homedir(), ".cargo", "bin")}:${process.env.PATH ?? ""}`;
 const appPath = join(cwd, "src-tauri/target/release/bundle/macos/iLlama.app");
 const dmgPath = join(cwd, `src-tauri/target/release/bundle/dmg/iLlama_${version}_aarch64.dmg`);
+const checksumPath = `${dmgPath}.sha256`;
 const binariesDir = join(cwd, "src-tauri/binaries");
 const notaryProfile = process.env.APPLE_NOTARY_PROFILE ?? "illama-notary";
-const unsignedRelease = process.env.ILLLAMA_UNSIGNED_RELEASE === "1";
+const unsignedRelease =
+  process.env.ILLAMA_UNSIGNED_RELEASE === "1" || process.env.ILLLAMA_UNSIGNED_RELEASE === "1";
 
 function run(command, args, options = {}) {
   console.log(`\n$ ${command} ${args.join(" ")}`);
@@ -57,6 +59,25 @@ function ensureExternalLlamaServerStrategy() {
     );
     process.exit(1);
   }
+}
+
+function ensureAppleSiliconBuildHost() {
+  if (process.platform !== "darwin" || process.arch !== "arm64") {
+    console.error(
+      `iLlama v${version} release artifacts must be built on macOS Apple Silicon; found ${process.platform}/${process.arch}.`,
+    );
+    process.exit(1);
+  }
+}
+
+function generateAndVerifyChecksum() {
+  const checksum = capture("shasum", ["-a", "256", dmgPath]);
+  if (!checksum.ok) {
+    console.error(checksum.output.trim());
+    process.exit(checksum.status ?? 1);
+  }
+  writeFileSync(checksumPath, checksum.output);
+  run("shasum", ["-a", "256", "-c", checksumPath]);
 }
 
 function resolveDeveloperIdIdentity() {
@@ -104,6 +125,7 @@ function ensureNotaryProfile() {
   }
 }
 
+ensureAppleSiliconBuildHost();
 ensureExternalLlamaServerStrategy();
 const signingIdentity = unsignedRelease ? null : resolveDeveloperIdIdentity();
 if (!unsignedRelease) {
@@ -111,17 +133,21 @@ if (!unsignedRelease) {
 }
 
 run("npm", ["test"]);
+run("npm", ["run", "lint"]);
 run("npm", ["run", "build"]);
+run("npm", ["run", "test:ui"]);
 run("cargo", ["test"], { cwd: join(cwd, "src-tauri") });
-run("cargo", ["fmt", "--check"], { cwd: join(cwd, "src-tauri") });
-run("cargo", ["clippy", "--all-targets", "--", "-D", "warnings"], { cwd: join(cwd, "src-tauri") });
+run("cargo", ["fmt", "--all", "--", "--check"], { cwd: join(cwd, "src-tauri") });
+run("cargo", ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"], {
+  cwd: join(cwd, "src-tauri"),
+});
 
 if (unsignedRelease) {
   console.warn(
     [
       "",
-      "Building an explicit unsigned macOS release because ILLLAMA_UNSIGNED_RELEASE=1 is set.",
-      "The resulting DMG is for direct user download only and will not have a stapled notarization ticket.",
+      "Building an explicit unsigned macOS artifact because ILLAMA_UNSIGNED_RELEASE=1 is set.",
+      "The resulting DMG is a workflow artifact only; it must never be attached to a GitHub Release.",
       "",
     ].join("\n"),
   );
@@ -183,8 +209,19 @@ if (unsignedRelease) {
   }
   console.warn(`Unsigned DMG built at: ${dmgPath}`);
 } else {
-  run("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]);
   run("xcrun", ["notarytool", "submit", dmgPath, "--keychain-profile", notaryProfile, "--wait"]);
   run("xcrun", ["stapler", "staple", dmgPath]);
   run("xcrun", ["stapler", "validate", dmgPath]);
+  run("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]);
+  run("spctl", [
+    "--assess",
+    "--type",
+    "open",
+    "--context",
+    "context:primary-signature",
+    "--verbose=4",
+    dmgPath,
+  ]);
 }
+
+generateAndVerifyChecksum();

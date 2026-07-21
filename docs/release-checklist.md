@@ -1,73 +1,93 @@
-# Release Checklist
+# iLlama 3.2.0 Release Checklist
 
-Current release target: `v3.1.0`.
+Formal target: macOS Apple Silicon only. Windows is preview-only and must not
+produce a 3.2.0 Release asset.
 
-## v3.1.0 Release
+## Repository and contract gates
 
-- [x] App metadata versions aligned to `3.1.0` in npm, Tauri, and Rust crate metadata
-- [x] Primary navigation is `运行 / 连接 / 测试`
-- [x] Parameter modes are reduced to `最大能力 / 自定义`
-- [x] Maximum capability mode derives `ctxSize` from model metadata and auto-sets smoke-test `maxTokens`
-- [x] Custom mode exposes slider controls for context length and output length
-- [x] V2 full chat workspace removed from the main UI and default TypeScript test/build surface
-- [x] Removed active V2 chat-history invoke APIs from the frontend
-- [x] Rust chat history surface renamed to explicit `legacy_chat_export`
-- [x] Connection panel shows Base URL, API Key, Model, Chat Completions, JSON copy, and external client profiles
-- [x] Connection panel opens external client sites in a new browser target
-- [x] Browser preview mode clearly warns that the endpoint may not be real
-- [x] Connection panel can check `/health` and `/v1/models`
-- [x] Copy failure falls back to visible manual-copy text
-- [x] Smoke-test chat timestamps use wall-clock ISO timestamps, not `performance.now()` values
-- [x] V2 history has a legacy JSON export entry
-- [x] `docs/client-compatibility.md` exists with client field names and validation gates
-- [x] `docs/releases/v3.1.0.md` exists as the release-body source for GitHub Release automation
-- [x] GitHub Actions workflow defaults point at `v3.1.0`
-- [x] GitHub CI run `28991492537` passed on Ubuntu, macOS, and Windows after the workspace cleanup and workflow action update
-- [ ] Fill `docs/client-compatibility.md` with actual tested versions before a signed public release
+- [ ] `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`,
+  `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` all resolve to `3.2.0`
+- [ ] Tag is exactly `v3.2.0-rc.1` or `v3.2.0` and points at the reviewed commit
+- [ ] Release filenames are exactly `iLlama_3.2.0_aarch64.dmg` and `.dmg.sha256`
+- [ ] `node scripts/verify-release-workflow.mjs`
+- [ ] `src-tauri/binaries/` contains no release sidecar except `.gitkeep`
+- [ ] CSP and remote-resource checks pass
+- [ ] README, changelog, compatibility matrix, release notes, and this checklist agree
 
-## Automated Verification
+## Automated verification
 
-- [x] `npm test`
-- [x] `npm run lint`
-- [x] `npm run build`
-- [x] `cargo test`
-- [x] `cargo fmt --all -- --check`
-- [x] `cargo clippy --all-targets --all-features -- -D warnings`
-- [x] Confirm `src-tauri/binaries/` contains no release sidecar except `.gitkeep`
-- [x] `ILLLAMA_UNSIGNED_RELEASE=1 npm run release:macos` for unsigned local artifact validation
+- [ ] `npm test`
+- [ ] `npm run lint`
+- [ ] `npm run build`
+- [ ] `npm run test:ui`
+- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`
+- [ ] `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check`
+- [ ] `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`
+- [ ] `npm audit --audit-level=high` reports no high or critical advisories
+- [ ] `npm audit --omit=dev` reports zero production dependency vulnerabilities
+- [ ] `cargo audit --file src-tauri/Cargo.lock`
 
-## macOS Signed Release
+## Runtime acceptance
 
-- [ ] `APPLE_SIGNING_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" APPLE_NOTARY_PROFILE=illama-notary npm run release:macos`
-- [ ] Confirm `iLlama.app/Contents/MacOS/illama`
-- [ ] Confirm the DMG has a stapled notarization ticket
-- [ ] Open generated `.app`
-- [ ] Gatekeeper assessment passes for signed app
+- [ ] Use a release-compatible, external `llama-server`; record its exact version
+- [ ] Run `npm run release:llama-matrix` with a real GGUF and retain its report/run ID
+- [ ] Confirm real GGUF scan → start → `/health` → `/v1/models` → chat → stop
+- [ ] Confirm the connection and test pages use the model ID returned by `/v1/models`
+- [ ] Confirm a running model A/port 8080 remains the displayed active runtime after draft changes to model B/port 9090
+- [ ] Confirm a service loading beyond 120 seconds stays stoppable and later becomes healthy
+- [ ] Confirm invalid GGUF cannot launch and limited GGUF requires a visible warning
+- [ ] Confirm unsupported optional server flags are omitted from the actual command
+- [ ] Confirm settings, tray choice, and log dock layout survive restart
+- [ ] Confirm corrupt settings recover with a timestamped backup
+- [ ] Complete the full keyboard flow at 1000×680 and 1280×720
 
-Signing/notarization status carried forward from 2026-05-13: trusted notarized release mode is blocked on machines without a Developer ID Application identity and usable notary profile. The explicit unsigned flow is `ILLLAMA_UNSIGNED_RELEASE=1 npm run release:macos`; it does not produce a stapled notarization ticket.
+## External-client compatibility
 
-## Manual Runtime QA
+- [ ] Test at least one client listed in `docs/client-compatibility.md`
+- [ ] Record client name, exact version, platform, field names, streaming result, and detected model ID
+- [ ] Do not label an untested profile “verified”
+- [ ] Save the acceptance record URL/run ID for the protected workflow input
 
-- [ ] Add a model directory containing at least one `.gguf`
-- [ ] Select model
-- [ ] Verify maximum-capability and custom command previews
-- [ ] Start with a valid `llama-server`
-- [ ] Confirm logs appear
-- [ ] Confirm local health status
-- [ ] Open `连接` and click `检测连接`
-- [ ] Copy connection info into at least one external client and send a text prompt
-- [ ] Use `测试` for one transient smoke-test prompt
-- [ ] Use `导出 V2 历史` on a fixture with old `chat-history` data
-- [ ] Stop model and confirm process exits
-- [ ] Check app remains responsive during streaming output
+## Signed RC (`v3.2.0-rc.1`)
 
-## Windows
+- [ ] Configure required reviewers and tag restrictions on GitHub Environment `macos-release`
+- [ ] Verify all six signing/notarization secrets listed in `docs/release-strategy.md`
+- [ ] Dispatch `Release 3.2.0` with `signed-release`, real matrix evidence, and external-client evidence
+- [ ] Workflow runs on `macos-15` and reports `arm64`
+- [ ] `codesign --verify --deep --strict` succeeds for `iLlama.app`
+- [ ] `notarytool submit --wait` returns Accepted
+- [ ] `stapler staple` and `stapler validate` succeed for the DMG
+- [ ] `spctl` accepts the app and DMG
+- [ ] `shasum -a 256 -c` succeeds
+- [ ] GitHub Release is marked prerelease and contains only the signed DMG and checksum
 
-- [x] `npm test` in GitHub CI
-- [x] `npm run build` in GitHub CI
-- [x] `cargo test` in GitHub CI
-- [ ] `npm run tauri:build`
-- [ ] Open generated installer/app
-- [ ] Repeat launch/connect/test/stop flow with a Windows `llama-server.exe`
-- [ ] Verify file paths with spaces
-- [ ] Verify port occupied fallback
+## Final (`v3.2.0`)
+
+- [ ] Download the RC onto a clean Apple Silicon Mac
+- [ ] Gatekeeper opens the downloaded DMG/app without bypass instructions
+- [ ] Repeat the real GGUF and external-client path on that clean Mac
+- [ ] Record clean-Mac evidence and all RC regressions/fixes
+- [ ] Dispatch the final tag with all three evidence inputs
+- [ ] Final Release is not a prerelease and checksum matches the downloaded DMG
+
+## Windows preview
+
+- [ ] Windows frontend and Rust CI pass
+- [ ] Optional preview build starts/stops an external `llama-server.exe`
+- [ ] Paths containing spaces and occupied-port fallback work
+- [ ] No Windows installer or archive is attached to the 3.2.0 GitHub Release
+
+## Hard blockers
+
+Do not create a signed RC or final Release if any item below is true:
+
+- Developer ID certificate, protected secret, or notarization credential is missing
+- notarization, staple validation, `codesign`, `spctl`, or checksum verification fails
+- real GGUF matrix or external-client evidence is absent
+- final release lacks clean Apple Silicon Mac evidence
+- a bundled/downloaded `llama-server` is present
+- a high/critical npm advisory, production npm vulnerability, or RustSec advisory remains
+- version/tag/artifact names disagree
+
+Use `unsigned-artifact` only for diagnosis. It uploads a short-lived workflow
+artifact and must never create or populate a GitHub Release.

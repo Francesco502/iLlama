@@ -1,74 +1,100 @@
-# iLlama Release Strategy
+# iLlama 3.2.0 Release Strategy
 
-## macOS v1.0
+## Supported release target
 
-iLlama v1.0 ships as a launcher-only app. It does not bundle `llama-server`.
-Users must either install `llama-server` so it is discoverable on `PATH`, or choose
-an existing executable from the app.
+iLlama 3.2.0 is formally distributed only as a macOS Apple Silicon DMG. The
+release workflow uses an `arm64` macOS runner and refuses to continue on another
+architecture.
 
-This is intentional for the first public build. The currently validated local
-binary at `/opt/homebrew/bin/llama-server` depends on Homebrew dynamic libraries
-under `/opt/homebrew`, so copying only that executable into the app bundle would
-produce a package that works on this machine but fails on a clean user's Mac.
+Windows remains a compile, test, and preview target in CI. A Windows installer
+must not be attached to either `v3.2.0-rc.1` or `v3.2.0`. Linux is a CI build and
+test target only.
 
-## Sidecar Policy
+## External llama-server policy
 
-Do not place release sidecars in `src-tauri/binaries/` unless the binary is known
-to be relocatable or the required dynamic libraries are bundled and the install
-names are fixed. The macOS release script rejects non-placeholder files in that
-directory to prevent accidental non-portable releases.
+The app never bundles or downloads `llama-server`. Users install a compatible
+binary themselves or select an existing executable. The release helper refuses
+to build when `src-tauri/binaries/` contains anything except `.gitkeep`.
 
-The future bundled-sidecar path is:
+This avoids distributing a Homebrew binary whose dynamic libraries remain under
+`/opt/homebrew`. Do not add a sidecar without a separate portability, licensing,
+code-signing, notarization, and clean-machine review.
 
-1. Build or obtain a notarization-compatible universal or architecture-specific
-   `llama-server`.
-2. Verify its dynamic library closure with `otool -L`.
-3. Bundle required non-system libraries or produce a self-contained binary.
-4. Re-sign nested binaries and libraries with Developer ID and hardened runtime.
-5. Re-enable bundle resources or Tauri `externalBin` intentionally.
-6. Repeat a clean-machine launch test before publishing.
+## Protected manual release
 
-## Signing And Notarization
+`.github/workflows/release.yml` has no tag-push trigger. A maintainer manually
+selects one of exactly two tags:
 
-The trusted public release DMG must be built with a Developer ID Application
-certificate and submitted to Apple notarization before distribution.
+- `v3.2.0-rc.1`, published as a prerelease;
+- `v3.2.0`, published as the latest release only after clean-machine acceptance.
 
-Expected local prerequisites:
+The signed job uses the `macos-release` GitHub Environment. Configure required
+reviewers and restrict deployment branches/tags for that environment in the
+repository settings. The workflow additionally requires links or run IDs for the
+real GGUF matrix and external-client acceptance. The final tag also requires a
+clean Apple Silicon Mac acceptance record.
 
-- A valid `Developer ID Application` identity in the login keychain.
-- A notarytool keychain profile. The default profile name used by the release
-  script is `illama-notary`.
+The tag must already point at the checked-out commit, and npm, Tauri, and Cargo
+metadata must all be `3.2.0`. Release notes come from
+`docs/releases/v3.2.0.md`.
 
-Create the notary profile with:
+## Signing and notarization credentials
+
+Store these secrets in the protected `macos-release` Environment, not as values
+in the repository:
+
+- `APPLE_CERTIFICATE`: base64-encoded Developer ID Application `.p12`;
+- `APPLE_CERTIFICATE_PASSWORD`: password for the `.p12`;
+- `APPLE_KEYCHAIN_PASSWORD`: ephemeral CI keychain password;
+- `APPLE_ID`: notarization Apple ID;
+- `APPLE_APP_SPECIFIC_PASSWORD`: app-specific password;
+- `APPLE_TEAM_ID`: Apple Developer team ID.
+
+The workflow validates every value before checkout or build. A missing
+certificate, identity, password, team ID, or working notary profile is a release
+blocker. It is never converted into an unsigned public release.
+
+The trusted path performs:
+
+1. frontend, UI, Rust, dependency, and release-policy checks;
+2. Developer ID import into an ephemeral keychain;
+3. hardened-runtime Tauri build;
+4. `codesign --verify` on the `.app`;
+5. `notarytool submit --wait` on the DMG;
+6. `stapler staple` and `stapler validate`;
+7. `spctl` assessment for the app and DMG;
+8. SHA-256 generation and verification;
+9. prerelease or final GitHub Release creation.
+
+The CI keychain is deleted even if the job fails.
+
+## Unsigned diagnostic artifacts
+
+The same manual workflow offers `unsigned-artifact`. It uses ad-hoc signing only,
+expects Gatekeeper assessment to fail, creates a checksum, and uploads a workflow
+artifact with seven-day retention. The job has read-only repository permissions
+and contains no GitHub Release action.
+
+For a local diagnostic build on Apple Silicon:
 
 ```bash
-xcrun notarytool store-credentials illama-notary \
-  --apple-id <apple-id> \
-  --team-id <team-id> \
-  --password <app-specific-password>
+ILLAMA_UNSIGNED_RELEASE=1 npm run release:macos
 ```
 
-Then build, sign, notarize, and staple with:
+The older misspelled `ILLLAMA_UNSIGNED_RELEASE` variable remains temporarily
+accepted for compatibility, but new automation must use `ILLAMA_UNSIGNED_RELEASE`.
+Unsigned artifacts are never suitable for public Release distribution.
 
-```bash
-APPLE_SIGNING_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" \
-APPLE_NOTARY_PROFILE=illama-notary \
-npm run release:macos
-```
+## Acceptance evidence
 
-If `APPLE_SIGNING_IDENTITY` is omitted, the script uses the first installed
-`Developer ID Application` identity it can find.
+Before dispatching the signed job, archive evidence for:
 
-## Unsigned Self-Download Builds
+- `npm test`, `npm run lint`, `npm run build`, and `npm run test:ui`;
+- `cargo test`, formatting, clippy, RustSec, and npm audit gates;
+- `npm run release:llama-matrix` against a real external `llama-server` and GGUF;
+- GGUF scan → start → health → `/v1/models` → chat → stop;
+- at least one external client, including its exact version and model ID;
+- final-only acceptance on a clean Apple Silicon Mac;
+- checksum verification after downloading the published DMG.
 
-When a Developer ID certificate or notary profile is unavailable, maintainers can
-produce an explicit unsigned hotfix artifact for direct user download:
-
-```bash
-ILLLAMA_UNSIGNED_RELEASE=1 npm run release:macos
-```
-
-This mode still runs the frontend and Rust verification steps, builds the `.app`
-and `.dmg`, and verifies the app bundle code signature that Tauri produces. It
-skips Apple notarization and staple validation, so the DMG will not have a
-stapled notarization ticket and macOS Gatekeeper may warn users on first launch.
+See `docs/release-checklist.md` for the operator checklist and blocking rules.

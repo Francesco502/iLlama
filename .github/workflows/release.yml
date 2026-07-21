@@ -1,31 +1,98 @@
-name: Release
+name: Release 3.2.0
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build and publish"
+        description: "Exact release tag"
         required: true
-        default: "v3.1.0"
+        type: choice
+        options:
+          - v3.2.0-rc.1
+          - v3.2.0
+      mode:
+        description: "Signed release or non-publishing unsigned artifact"
+        required: true
+        default: signed-release
+        type: choice
+        options:
+          - signed-release
+          - unsigned-artifact
+      llama_matrix_evidence:
+        description: "URL or run ID for the real GGUF scan/start/health/models/chat/stop matrix"
+        required: false
+        type: string
+      external_client_evidence:
+        description: "URL or record for a versioned external-client acceptance run"
+        required: false
+        type: string
+      clean_mac_evidence:
+        description: "Final v3.2.0 only: clean Apple Silicon Mac acceptance record"
+        required: false
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag }}-${{ inputs.mode }}
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-macos:
-    name: Build macOS release artifact
+  signed-release:
+    name: Sign, notarize, verify, and publish Apple Silicon release
+    if: inputs.mode == 'signed-release'
     runs-on: macos-15
+    environment: macos-release
+    permissions:
+      contents: write
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      APPLE_NOTARY_PROFILE: illama-ci
+      LLAMA_MATRIX_EVIDENCE: ${{ inputs.llama_matrix_evidence }}
+      EXTERNAL_CLIENT_EVIDENCE: ${{ inputs.external_client_evidence }}
+      CLEAN_MAC_EVIDENCE: ${{ inputs.clean_mac_evidence }}
 
     steps:
-      - name: Checkout
+      - name: Block release without every signing and notarization credential
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_KEYCHAIN_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Required protected-environment secret is missing: ${name}"
+              exit 1
+            fi
+          done
+
+      - name: Checkout the exact release tag
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Validate tag, version, notes, architecture, and external-server policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" == "v3.2.0-rc.1" || "$RELEASE_TAG" == "v3.2.0" ]]
+          [[ "$(git describe --tags --exact-match HEAD)" == "$RELEASE_TAG" ]]
+          [[ "$(node -p 'require("./package.json").version')" == "3.2.0" ]]
+          [[ "$(uname -m)" == "arm64" ]]
+          test -f docs/releases/v3.2.0.md
+          test -z "$(find src-tauri/binaries -type f ! -name .gitkeep -print -quit 2>/dev/null)"
+          [[ -n "$LLAMA_MATRIX_EVIDENCE" ]]
+          [[ -n "$EXTERNAL_CLIENT_EVIDENCE" ]]
+          if [[ "$RELEASE_TAG" == "v3.2.0" ]]; then
+            [[ -n "$CLEAN_MAC_EVIDENCE" ]]
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -35,37 +102,156 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Verify frontend
+      - name: Verify release policy and dependency advisories
+        shell: bash
         run: |
-          npm test
-          npm run build
+          set -euo pipefail
+          node scripts/verify-release-workflow.mjs
+          npm audit --audit-level=high
+          npm audit --omit=dev
+          cargo install cargo-audit --locked
+          cargo audit --file src-tauri/Cargo.lock
 
-      - name: Verify Rust
-        working-directory: src-tauri
+      - name: Import Developer ID certificate
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
         run: |
-          cargo test
-          cargo fmt --check
-          cargo clippy --all-targets -- -D warnings
+          set -euo pipefail
+          CERTIFICATE_PATH="$RUNNER_TEMP/illama-signing-certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/illama-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
 
-      - name: Build unsigned macOS bundle
-        run: npm run tauri:build
-
-      - name: Generate checksum
+      - name: Configure notarytool credentials
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          VERSION=$(node -p 'require("./package.json").version')
-          shasum -a 256 "src-tauri/target/release/bundle/dmg/iLlama_${VERSION}_aarch64.dmg" \
-            > "src-tauri/target/release/bundle/dmg/iLlama_${VERSION}_aarch64.dmg.sha256"
+          set -euo pipefail
+          xcrun notarytool store-credentials "$APPLE_NOTARY_PROFILE" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
 
-      - name: Create GitHub release
+      - name: Build, sign, notarize, staple, and verify
+        run: npm run release:macos
+
+      - name: Verify final DMG and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG="src-tauri/target/release/bundle/dmg/iLlama_3.2.0_aarch64.dmg"
+          APP="src-tauri/target/release/bundle/macos/iLlama.app"
+          test -f "$DMG"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
+          shasum -a 256 "$DMG" > "$DMG.sha256"
+          shasum -a 256 -c "$DMG.sha256"
+
+      - name: Publish release candidate
+        if: inputs.tag == 'v3.2.0-rc.1'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          body_path: docs/releases/${{ env.RELEASE_TAG }}.md
-          overwrite_files: true
+          tag_name: v3.2.0-rc.1
+          name: iLlama 3.2.0 RC 1
+          body_path: docs/releases/v3.2.0.md
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
           files: |
-            src-tauri/target/release/bundle/dmg/iLlama_*_aarch64.dmg
-            src-tauri/target/release/bundle/dmg/iLlama_*_aarch64.dmg.sha256
+            src-tauri/target/release/bundle/dmg/iLlama_3.2.0_aarch64.dmg
+            src-tauri/target/release/bundle/dmg/iLlama_3.2.0_aarch64.dmg.sha256
+
+      - name: Publish final release
+        if: inputs.tag == 'v3.2.0'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.2.0
+          name: iLlama 3.2.0
+          body_path: docs/releases/v3.2.0.md
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            src-tauri/target/release/bundle/dmg/iLlama_3.2.0_aarch64.dmg
+            src-tauri/target/release/bundle/dmg/iLlama_3.2.0_aarch64.dmg.sha256
+
+      - name: Delete temporary signing keychain
+        if: always()
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/illama-signing.keychain-db" || true
+
+  unsigned-artifact:
+    name: Build unsigned Apple Silicon artifact without publishing
+    if: inputs.mode == 'unsigned-artifact'
+    runs-on: macos-15
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      ILLAMA_UNSIGNED_RELEASE: "1"
+
+    steps:
+      - name: Checkout the exact tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Validate non-publishing artifact target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" == "v3.2.0-rc.1" || "$RELEASE_TAG" == "v3.2.0" ]]
+          [[ "$(git describe --tags --exact-match HEAD)" == "$RELEASE_TAG" ]]
+          [[ "$(node -p 'require("./package.json").version')" == "3.2.0" ]]
+          [[ "$(uname -m)" == "arm64" ]]
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - run: npm ci
+      - run: node scripts/verify-release-workflow.mjs
+      - name: Build unsigned artifact
+        run: npm run release:macos
+
+      - name: Generate unsigned artifact checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG="src-tauri/target/release/bundle/dmg/iLlama_3.2.0_aarch64.dmg"
+          shasum -a 256 "$DMG" > "$DMG.sha256"
+          shasum -a 256 -c "$DMG.sha256"
+
+      - name: Upload unsigned workflow artifact only
+        uses: actions/upload-artifact@v4
+        with:
+          name: iLlama-3.2.0-unsigned-aarch64-${{ inputs.tag }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            src-tauri/target/release/bundle/dmg/iLlama_3.2.0_aarch64.dmg
+            src-tauri/target/release/bundle/dmg/iLlama_3.2.0_aarch64.dmg.sha256
