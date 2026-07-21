@@ -141,9 +141,13 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
       .catch((error) => {
         if (disposed || generation !== generationRef.current) return;
         appendSystemLogRef.current(
-          `恢复运行状态失败，将在下次操作时重试：${
+          `恢复运行状态失败，将自动重试：${
             error instanceof Error ? error.message : String(error)
           }`,
+        );
+        pollTimerRef.current = setTimeout(
+          () => void pollRuntimeRef.current(generation),
+          HEALTH_POLL_INTERVAL_MS,
         );
       });
     return () => {

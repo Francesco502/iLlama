@@ -91,6 +91,23 @@ describe("useLlamaProcess", () => {
     expect(result.current.canStop).toBe(true);
   });
 
+  it("retries mount hydration after a temporary invoke failure", async () => {
+    vi.mocked(runtimeSnapshot)
+      .mockRejectedValueOnce(new Error("temporary IPC failure"))
+      .mockResolvedValueOnce(startingSnapshot);
+    const { result } = renderHook(() =>
+      useLlamaProcess({ appendSystemLog: vi.fn(), mergeLogs: vi.fn() }),
+    );
+    await act(async () => Promise.resolve());
+
+    expect(result.current.snapshot.status).toBe("idle");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+
+    expect(runtimeSnapshot).toHaveBeenCalledTimes(2);
+    expect(result.current.snapshot.pid).toBe(42);
+    expect(result.current.canStop).toBe(true);
+  });
+
   it("exposes the backend active launch snapshot after starting", async () => {
     const { result } = renderHook(() =>
       useLlamaProcess({ appendSystemLog: vi.fn(), mergeLogs: vi.fn() }),

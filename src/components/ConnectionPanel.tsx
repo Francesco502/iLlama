@@ -47,7 +47,14 @@ export function ConnectionPanel({
       checkGenerationRef.current += 1;
       checkControllerRef.current?.abort();
     };
-  }, [connection.host, connection.modelsUrl, connection.port]);
+  }, [
+    connection.healthy,
+    connection.host,
+    connection.model,
+    connection.modelsUrl,
+    connection.port,
+    connection.source,
+  ]);
 
   async function copy(text: string, label: string, type: "info" | "json") {
     try {
