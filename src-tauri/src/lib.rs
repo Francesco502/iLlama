@@ -6,6 +6,7 @@ pub mod llama_process;
 pub mod model_scan;
 pub mod monitor;
 pub mod parameters;
+pub mod server_probe;
 pub mod settings;
 pub mod tray;
 
@@ -16,13 +17,17 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(llama_process::LlamaProcessState::default())
+        .manage(settings::SettingsStore::default())
         .invoke_handler(tauri::generate_handler![
             commands::validate_launch_config_command,
             commands::build_command_args_command,
+            commands::probe_llama_server_command,
+            commands::build_command_spec_command,
             commands::scan_model_directory_command,
             commands::load_settings_command,
             commands::resolve_llama_server_path_command,
             commands::save_settings_command,
+            commands::patch_settings_command,
             commands::export_legacy_chat_history_command,
             commands::start_llama_command,
             commands::stop_llama_command,
@@ -38,7 +43,7 @@ pub fn run() {
             if let Ok(app_data_dir) = app.path().app_data_dir() {
                 let path = settings_path(app_data_dir);
                 if let Ok(settings) = load_settings_from(&path) {
-                    if settings.show_in_menu_bar {
+                    if settings.ui.show_in_menu_bar {
                         let _ = tray::create_tray(app.handle());
                     }
                 }

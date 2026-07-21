@@ -91,16 +91,31 @@ describe("app state helpers", () => {
       selectedModelPath: "/models/a/model-a.gguf",
       port: 9090,
       startupParameters: parameters,
+      sampling: { ...getProfileById("custom").sampling, maxTokens: 512 },
       prometheusHints: emptyPrometheusHintsConfig(),
+      ui: {
+        showInMenuBar: true,
+        logPanelOpen: true,
+        logPanelHeight: 240,
+        advancedOpen: false,
+      },
     });
 
     expect(snapshot).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       modelDirectories: ["/models/a"],
       llamaServerPath: "/bin/llama-server",
-      parameterPresetSourceId: "user:precise",
-      defaultPort: 9090,
-      idleSleepSeconds: 30,
+      launchDraft: {
+        profileId: "custom",
+        parameterPresetSourceId: "user:precise",
+        port: 9090,
+        parameters: {
+          batchSize: 2048,
+          idleSleepSeconds: 30,
+        },
+      },
+      sampling: { maxTokens: 512 },
+      ui: { showInMenuBar: true, logPanelOpen: true, logPanelHeight: 240 },
     });
   });
 });

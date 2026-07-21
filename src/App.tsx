@@ -52,6 +52,7 @@ import {
   type ParameterProfile,
   type PrometheusHintsConfig,
 } from "./types/domain";
+import type { AppSettings } from "./api/tauri";
 
 const DEFAULT_PORT = 8080;
 
@@ -85,7 +86,12 @@ export function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("run");
   const [modelSort, setModelSort] = useState<"name" | "size" | "date">("name");
   const [modelSearch, setModelSearch] = useState("");
-  const [trayEnabled, setTrayEnabledState] = useState(false);
+  const [uiSettings, setUiSettings] = useState<AppSettings["ui"]>({
+    showInMenuBar: false,
+    logPanelOpen: false,
+    logPanelHeight: 180,
+    advancedOpen: false,
+  });
 
   const hasBootstrappedRef = useRef(!runningInTauri);
 
@@ -108,8 +114,10 @@ export function App() {
 
   // --- Custom hooks ---
   const {
+    snapshot: runtimeSnapshot,
     runtimeStatus,
     runtimeMetrics,
+    canStop,
     handleStart: startProcess,
     handleStop,
     stopHealthPoll,
@@ -155,7 +163,9 @@ export function App() {
         selectedModelPath,
         port,
         startupParameters,
+        sampling,
         prometheusHints,
+        ui: uiSettings,
       }),
     [
       binaryPath,
@@ -166,6 +176,8 @@ export function App() {
       prometheusHints,
       selectedModelPath,
       startupParameters,
+      sampling,
+      uiSettings,
     ],
   );
 
@@ -191,6 +203,8 @@ export function App() {
     setProfileId,
     setParameterPresetSourceId,
     setStartupParameters,
+    setSampling,
+    setUiSettings,
     setDirectories,
     setModels,
     setSelectedModelPath,
@@ -204,7 +218,9 @@ export function App() {
   useEffect(() => {
     if (!runningInTauri) return;
     getTrayEnabled()
-      .then(setTrayEnabledState)
+      .then((enabled) =>
+        setUiSettings((current) => ({ ...current, showInMenuBar: enabled })),
+      )
       .catch(() => {/* ignore — tray API might not be available in dev */});
   }, [runningInTauri]);
 
@@ -230,11 +246,11 @@ export function App() {
   const runtimeConnection = useMemo(
     () =>
       buildRuntimeConnection({
-        port,
-        modelName: selectedModel?.fileName ?? null,
-        healthy: runtimeStatus === "healthy",
+        snapshot: runtimeSnapshot,
+        draftPort: port,
+        draftModelName: selectedModel?.fileName ?? null,
       }),
-    [port, runtimeStatus, selectedModel?.fileName],
+    [port, runtimeSnapshot, selectedModel?.fileName],
   );
 
   useEffect(() => {
@@ -436,7 +452,7 @@ export function App() {
           <button
             className="start-button"
             type="button"
-            disabled={runtimeStatus === "starting" || runtimeStatus === "healthy"}
+            disabled={canStop}
             onClick={handleStart}
           >
             {runtimeStatus === "starting" ? (
@@ -563,9 +579,9 @@ export function App() {
           <ConnectionPanel
             connection={runtimeConnection}
             runningInTauri={runningInTauri}
-            trayEnabled={trayEnabled}
+            trayEnabled={uiSettings.showInMenuBar}
             onTrayToggle={(enabled) => {
-              setTrayEnabledState(enabled);
+              setUiSettings((current) => ({ ...current, showInMenuBar: enabled }));
               if (runningInTauri) {
                 setTrayEnabled(enabled).catch((err) =>
                   appendSystemLog(`状态栏图标设置失败：${err instanceof Error ? err.message : String(err)}`),
@@ -590,6 +606,7 @@ export function App() {
         logs={logs}
         runtimeStatus={runtimeStatus}
         runtimeMetrics={runtimeMetrics}
+        canStop={canStop}
         onStop={handleStop}
         onClearLogs={clearLogs}
       />

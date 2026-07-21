@@ -1,117 +1,358 @@
-use crate::parameters::PrometheusHintsConfig;
+use crate::parameters::{
+    FlashAttentionSetting, GpuLayerSetting, PrometheusHintsConfig, StartupParameters, ThreadSetting,
+};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::{
-    env, fs, io,
+    env, fs,
+    io::{self, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default)]
+pub struct SettingsStore {
+    mutation_lock: Mutex<()>,
+}
+
+impl SettingsStore {
+    pub fn patch(&self, path: &Path, patch: serde_json::Value) -> io::Result<SettingsEnvelope> {
+        let _guard = self
+            .mutation_lock
+            .lock()
+            .map_err(|_| io::Error::other("设置存储锁定失败。"))?;
+        patch_settings_to(path, patch)
+    }
+
+    pub fn save(&self, path: &Path, settings: &AppSettings) -> io::Result<()> {
+        let _guard = self
+            .mutation_lock
+            .lock()
+            .map_err(|_| io::Error::other("设置存储锁定失败。"))?;
+        save_settings_to(path, settings)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatHistorySettings {
-    pub enabled: bool,
-    pub image_persistence: String,
-    pub include_reasoning_in_export_default: bool,
-    pub max_conversations: usize,
+pub struct SamplingSettings {
+    pub temperature: f64,
+    pub top_p: f64,
+    pub top_k: u32,
+    pub min_p: f64,
+    pub repeat_penalty: f64,
+    pub repeat_last_n: u32,
+    pub seed: Option<i64>,
+    pub max_tokens: u32,
+    pub stop: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchDraftSettings {
+    pub profile_id: String,
+    pub parameter_preset_source_id: String,
+    pub selected_model_path: Option<String>,
+    pub auto_port: bool,
+    pub port: u16,
+    pub parameters: StartupParameters,
+    pub prometheus_hints: PrometheusHintsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UiSettings {
+    pub show_in_menu_bar: bool,
+    pub log_panel_open: bool,
+    pub log_panel_height: u16,
+    pub advanced_open: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub schema_version: u32,
     pub model_directories: Vec<String>,
     pub llama_server_path: Option<String>,
-    pub default_preset_id: String,
-    #[serde(default = "default_parameter_preset_source_id")]
-    pub parameter_preset_source_id: String,
-    pub last_selected_model_path: Option<String>,
-    pub auto_port: bool,
-    pub default_port: u16,
-    pub idle_sleep_seconds: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub save_chat_history: Option<bool>,
-    #[serde(default)]
-    pub prometheus_hints: PrometheusHintsConfig,
-    #[serde(default = "default_chat_history_settings")]
-    pub chat_history: ChatHistorySettings,
-    #[serde(default)]
-    pub show_in_menu_bar: bool,
+    pub launch_draft: LaunchDraftSettings,
+    pub sampling: SamplingSettings,
+    pub ui: UiSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsWarning {
+    pub code: String,
+    pub message: String,
+    pub recovery_action: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsEnvelope {
+    pub settings: AppSettings,
+    pub warnings: Vec<SettingsWarning>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct LegacySettings {
+    schema_version: u32,
+    model_directories: Vec<String>,
+    llama_server_path: Option<String>,
+    default_preset_id: String,
+    parameter_preset_source_id: String,
+    last_selected_model_path: Option<String>,
+    auto_port: bool,
+    default_port: u16,
+    idle_sleep_seconds: u32,
+    prometheus_hints: PrometheusHintsConfig,
+    show_in_menu_bar: bool,
+}
+
+impl Default for LegacySettings {
+    fn default() -> Self {
+        Self {
+            schema_version: 2,
+            model_directories: Vec::new(),
+            llama_server_path: None,
+            default_preset_id: "max-capability".to_string(),
+            parameter_preset_source_id: default_parameter_preset_source_id(),
+            last_selected_model_path: None,
+            auto_port: true,
+            default_port: 8080,
+            idle_sleep_seconds: 0,
+            prometheus_hints: PrometheusHintsConfig::default(),
+            show_in_menu_bar: false,
+        }
+    }
 }
 
 pub fn default_settings() -> AppSettings {
     AppSettings {
-        schema_version: 2,
+        schema_version: 3,
         model_directories: Vec::new(),
         llama_server_path: detect_default_llama_server_path()
             .map(|path| path.to_string_lossy().to_string()),
-        default_preset_id: "max-capability".to_string(),
-        parameter_preset_source_id: default_parameter_preset_source_id(),
-        last_selected_model_path: None,
-        auto_port: true,
-        default_port: 8080,
-        idle_sleep_seconds: 0,
-        save_chat_history: None,
-        prometheus_hints: PrometheusHintsConfig::default(),
-        chat_history: default_chat_history_settings(),
-        show_in_menu_bar: false,
+        launch_draft: LaunchDraftSettings {
+            profile_id: "auto".to_string(),
+            parameter_preset_source_id: default_parameter_preset_source_id(),
+            selected_model_path: None,
+            auto_port: true,
+            port: 8080,
+            parameters: default_startup_parameters(),
+            prometheus_hints: PrometheusHintsConfig::default(),
+        },
+        sampling: default_sampling_settings(),
+        ui: UiSettings {
+            show_in_menu_bar: false,
+            log_panel_open: false,
+            log_panel_height: 180,
+            advanced_open: false,
+        },
     }
 }
 
 pub fn load_settings_from(path: &Path) -> io::Result<AppSettings> {
+    Ok(load_settings_envelope_from(path)?.settings)
+}
+
+pub fn load_settings_envelope_from(path: &Path) -> io::Result<SettingsEnvelope> {
     if !path.exists() {
-        return Ok(default_settings());
+        return Ok(SettingsEnvelope {
+            settings: default_settings(),
+            warnings: Vec::new(),
+        });
     }
 
     let content = fs::read_to_string(path)?;
-    let settings = serde_json::from_str(&content).unwrap_or_else(|_| default_settings());
-    Ok(migrate_settings(settings))
+    let value: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(value) => value,
+        Err(_) => return recover_corrupt_settings(path, &content),
+    };
+    let schema_version = value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1);
+    if schema_version >= 3 {
+        let settings = match serde_json::from_value::<AppSettings>(value) {
+            Ok(settings) => normalize_settings(settings),
+            Err(_) => return recover_corrupt_settings(path, &content),
+        };
+        return Ok(SettingsEnvelope {
+            settings,
+            warnings: Vec::new(),
+        });
+    }
+
+    let legacy = match serde_json::from_value::<LegacySettings>(value) {
+        Ok(settings) => settings,
+        Err(_) => return recover_corrupt_settings(path, &content),
+    };
+    let settings = migrate_legacy_settings(legacy);
+    save_settings_to(path, &settings)?;
+    Ok(SettingsEnvelope {
+        settings,
+        warnings: vec![SettingsWarning {
+            code: "settings_migrated".to_string(),
+            message: "设置已升级到 3.2.0 格式。".to_string(),
+            recovery_action: "none".to_string(),
+        }],
+    })
 }
 
 pub fn save_settings_to(path: &Path, settings: &AppSettings) -> io::Result<()> {
     ensure_parent(path)?;
     let content = serde_json::to_string_pretty(settings)?;
-    fs::write(path, content)
+    let temp_path = path.with_extension("json.tmp");
+    let mut temp = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&temp_path)?;
+    temp.write_all(content.as_bytes())?;
+    temp.sync_all()?;
+    drop(temp);
+    replace_file(&temp_path, path)
+}
+
+pub fn patch_settings_to(path: &Path, patch: serde_json::Value) -> io::Result<SettingsEnvelope> {
+    let mut envelope = load_settings_envelope_from(path)?;
+    let mut value = serde_json::to_value(&envelope.settings)?;
+    merge_json_patch(&mut value, patch);
+    value["schemaVersion"] = serde_json::Value::from(3);
+    let settings = serde_json::from_value::<AppSettings>(value)
+        .map(normalize_settings)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    save_settings_to(path, &settings)?;
+    envelope.settings = settings;
+    Ok(envelope)
 }
 
 pub fn settings_path(app_data_dir: PathBuf) -> PathBuf {
     app_data_dir.join("settings.json")
 }
 
-pub fn default_chat_history_settings() -> ChatHistorySettings {
-    ChatHistorySettings {
-        enabled: false,
-        image_persistence: "none".to_string(),
-        include_reasoning_in_export_default: false,
-        max_conversations: 200,
+fn default_startup_parameters() -> StartupParameters {
+    StartupParameters {
+        ctx_size: 32_768,
+        threads: ThreadSetting::Auto,
+        threads_batch: ThreadSetting::Auto,
+        gpu_layers: GpuLayerSetting::All,
+        batch_size: 2_048,
+        ubatch_size: 512,
+        flash_attention: FlashAttentionSetting::Auto,
+        mmap: true,
+        mlock: false,
+        metrics: true,
+        idle_sleep_seconds: 0,
+        mmproj_path: None,
+        mmproj_offload: true,
     }
 }
 
-fn migrate_settings(mut settings: AppSettings) -> AppSettings {
-    if settings.schema_version < 2 {
-        let enabled = settings.save_chat_history.unwrap_or(false);
-        settings.schema_version = 2;
-        settings.chat_history = ChatHistorySettings {
-            enabled,
-            image_persistence: if enabled {
-                "thumbnail".to_string()
-            } else {
-                "none".to_string()
-            },
-            include_reasoning_in_export_default: false,
-            max_conversations: 200,
-        };
-        settings.save_chat_history = None;
+fn default_sampling_settings() -> SamplingSettings {
+    SamplingSettings {
+        temperature: 0.7,
+        top_p: 0.9,
+        top_k: 40,
+        min_p: 0.05,
+        repeat_penalty: 1.1,
+        repeat_last_n: 64,
+        seed: None,
+        max_tokens: 2_048,
+        stop: Vec::new(),
     }
-    settings.default_preset_id = match settings.default_preset_id.as_str() {
-        "max-capability" | "custom" => settings.default_preset_id,
-        "low-memory" | "balanced" | "performance" => "custom".to_string(),
-        _ => "max-capability".to_string(),
+}
+
+fn migrate_legacy_settings(legacy: LegacySettings) -> AppSettings {
+    let mut settings = default_settings();
+    settings.model_directories = legacy.model_directories;
+    settings.llama_server_path = legacy.llama_server_path;
+    settings.launch_draft.profile_id = match legacy.default_preset_id.as_str() {
+        "custom" | "low-memory" | "balanced" | "performance" => "custom".to_string(),
+        _ => "auto".to_string(),
     };
-    settings.parameter_preset_source_id = match settings.parameter_preset_source_id.as_str() {
-        "model-family:auto" | "user:balanced" | "user:precise" | "user:creative"
-        | "user:low-memory" => settings.parameter_preset_source_id.clone(),
-        _ => default_parameter_preset_source_id(),
-    };
+    settings.launch_draft.parameter_preset_source_id =
+        normalize_parameter_preset_source(legacy.parameter_preset_source_id);
+    settings.launch_draft.selected_model_path = legacy.last_selected_model_path;
+    settings.launch_draft.auto_port = legacy.auto_port;
+    settings.launch_draft.port = legacy.default_port.max(1024);
+    settings.launch_draft.parameters.idle_sleep_seconds = legacy.idle_sleep_seconds;
+    settings.launch_draft.prometheus_hints = legacy.prometheus_hints;
+    settings.ui.show_in_menu_bar = legacy.show_in_menu_bar;
     settings
+}
+
+fn normalize_settings(mut settings: AppSettings) -> AppSettings {
+    settings.schema_version = 3;
+    settings.launch_draft.profile_id = match settings.launch_draft.profile_id.as_str() {
+        "auto" | "custom" => settings.launch_draft.profile_id,
+        "max-capability" => "auto".to_string(),
+        _ => "custom".to_string(),
+    };
+    settings.launch_draft.parameter_preset_source_id =
+        normalize_parameter_preset_source(settings.launch_draft.parameter_preset_source_id);
+    settings.launch_draft.port = settings.launch_draft.port.max(1024);
+    settings.ui.log_panel_height = settings.ui.log_panel_height.clamp(96, 360);
+    settings.sampling.max_tokens = settings.sampling.max_tokens.max(1);
+    settings
+}
+
+fn normalize_parameter_preset_source(source: String) -> String {
+    match source.as_str() {
+        "model-family:auto" | "user:balanced" | "user:precise" | "user:creative"
+        | "user:low-memory" => source,
+        _ => default_parameter_preset_source_id(),
+    }
+}
+
+fn recover_corrupt_settings(path: &Path, content: &str) -> io::Result<SettingsEnvelope> {
+    ensure_parent(path)?;
+    let stamp = Utc::now().format("%Y%m%dT%H%M%S%3fZ");
+    let backup = path.with_file_name(format!("settings.corrupt-{stamp}.json"));
+    fs::write(&backup, content)?;
+    let settings = default_settings();
+    save_settings_to(path, &settings)?;
+    Ok(SettingsEnvelope {
+        settings,
+        warnings: vec![SettingsWarning {
+            code: "settings_recovered".to_string(),
+            message: format!("设置文件损坏，已备份到 {}。", backup.display()),
+            recovery_action: "open-settings-backup".to_string(),
+        }],
+    })
+}
+
+fn merge_json_patch(target: &mut serde_json::Value, patch: serde_json::Value) {
+    match (target, patch) {
+        (serde_json::Value::Object(target), serde_json::Value::Object(patch)) => {
+            for (key, value) in patch {
+                if let Some(existing) = target.get_mut(&key) {
+                    merge_json_patch(existing, value);
+                } else {
+                    target.insert(key, value);
+                }
+            }
+        }
+        (target, patch) => *target = patch,
+    }
+}
+
+fn replace_file(temp_path: &Path, path: &Path) -> io::Result<()> {
+    #[cfg(target_os = "windows")]
+    if path.exists() {
+        let backup = path.with_extension("json.bak");
+        let _ = fs::remove_file(&backup);
+        fs::rename(path, &backup)?;
+        if let Err(error) = fs::rename(temp_path, path) {
+            let _ = fs::rename(&backup, path);
+            return Err(error);
+        }
+        let _ = fs::remove_file(backup);
+        return Ok(());
+    }
+    fs::rename(temp_path, path)
 }
 
 fn default_parameter_preset_source_id() -> String {

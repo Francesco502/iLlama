@@ -45,7 +45,7 @@ describe("ParameterPanel", () => {
 
     render(<Host />);
 
-    expect(screen.getByRole("button", { name: "最大能力" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "自动配置" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "自定义" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "低内存" })).not.toBeInTheDocument();
 

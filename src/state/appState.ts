@@ -4,6 +4,7 @@ import type {
   ModelEntry,
   ParameterProfile,
   PrometheusHintsConfig,
+  SamplingParameters,
   StartupParameters,
 } from "../types/domain";
 import type { ParameterPresetSourceId } from "../lib/parameterPresets";
@@ -16,7 +17,9 @@ interface SettingsSnapshotInput {
   selectedModelPath: string | null;
   port: number;
   startupParameters: StartupParameters;
+  sampling: SamplingParameters;
   prometheusHints: PrometheusHintsConfig;
+  ui: AppSettings["ui"];
 }
 
 export function mergeScannedModels(
@@ -63,21 +66,27 @@ export function buildSettingsSnapshot({
   selectedModelPath,
   port,
   startupParameters,
+  sampling,
   prometheusHints,
+  ui,
 }: SettingsSnapshotInput): AppSettings {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     modelDirectories: directories
       .filter((directory) => directory.status === "ready")
       .map((directory) => directory.path),
     llamaServerPath: binaryPath,
-    defaultPresetId: profileId,
-    parameterPresetSourceId,
-    lastSelectedModelPath: selectedModelPath,
-    autoPort: true,
-    defaultPort: port,
-    idleSleepSeconds: startupParameters.idleSleepSeconds,
-    prometheusHints,
+    launchDraft: {
+      profileId: profileId === "max-capability" ? "auto" : "custom",
+      parameterPresetSourceId,
+      selectedModelPath,
+      autoPort: true,
+      port,
+      parameters: startupParameters,
+      prometheusHints,
+    },
+    sampling,
+    ui,
   };
 }
 

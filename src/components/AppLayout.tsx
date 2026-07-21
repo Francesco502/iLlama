@@ -23,6 +23,7 @@ interface AppLayoutProps {
   logs: LogEntry[];
   runtimeStatus: RuntimeStatus;
   runtimeMetrics: RuntimeMetrics;
+  canStop: boolean;
   onStop: () => void;
   onClearLogs?: () => void;
 }
@@ -56,6 +57,7 @@ export function AppLayout({
   logs,
   runtimeStatus,
   runtimeMetrics,
+  canStop,
   onStop,
   onClearLogs,
 }: AppLayoutProps) {
@@ -66,7 +68,6 @@ export function AppLayout({
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
   const logResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
-  const canStop = runtimeStatus === "starting" || runtimeStatus === "healthy";
 
   const stopLogResize = useCallback(() => {
     logResizeRef.current = null;

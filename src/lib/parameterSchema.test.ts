@@ -39,7 +39,7 @@ describe("parameter schema", () => {
     const preview = buildCommandPreview(baseConfig);
 
     expect(preview).toEqual([
-      "llama-server",
+      "/usr/local/bin/llama-server",
       "--model",
       "/models/qwen2.5-7b-instruct-q4_k_m.gguf",
       "--host",
@@ -115,8 +115,9 @@ describe("parameter schema", () => {
     expect(result.errors).toContain("Micro-batch 不能大于 batch size。");
   });
 
-  it("exposes only maximum capability and custom parameter modes", () => {
+  it("exposes only automatic and custom parameter modes", () => {
     expect(builtInProfiles.map((profile) => profile.id)).toEqual(["max-capability", "custom"]);
+    expect(getProfileById("max-capability").name).toBe("自动配置");
 
     const profile = getProfileById("custom");
     expect(profile.name).toBe("自定义");
@@ -137,8 +138,7 @@ describe("parameter schema", () => {
     expect(parameters.gpuLayers).toBe("all");
     expect(parameters.batchSize).toBe(2048);
     expect(parameters.ubatchSize).toBe(512);
-    expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(65_536));
-    expect(sampling.maxTokens).toBeLessThan(65_536);
+    expect(sampling.maxTokens).toBe(2048);
   });
 
   it("uses the full 256k model context in maximum capability mode", () => {
@@ -146,8 +146,7 @@ describe("parameter schema", () => {
     const sampling = buildMaxCapabilitySampling(parameters.ctxSize, defaultSampling());
 
     expect(parameters.ctxSize).toBe(262_144);
-    expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(262_144));
-    expect(sampling.maxTokens).toBeLessThan(262_144);
+    expect(sampling.maxTokens).toBe(2048);
   });
 
   it("does not impose a fixed app ceiling when model metadata reports a larger context", () => {
@@ -155,9 +154,12 @@ describe("parameter schema", () => {
     const sampling = buildMaxCapabilitySampling(parameters.ctxSize, defaultSampling());
 
     expect(parameters.ctxSize).toBe(524_288);
-    expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(524_288));
-    expect(sampling.maxTokens).toBeGreaterThan(calculateMaxOutputTokens(262_144));
-    expect(sampling.maxTokens).toBeLessThan(524_288);
+    expect(sampling.maxTokens).toBe(2048);
+  });
+
+  it("reserves most of a small context window for prompts", () => {
+    expect(calculateMaxOutputTokens(4096)).toBe(1024);
+    expect(calculateMaxOutputTokens(8192)).toBe(2048);
   });
 });
 

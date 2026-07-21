@@ -22,7 +22,7 @@ const runtimeMetrics: RuntimeMetrics = {
   kvCacheUsageRatio: null,
 };
 
-function renderLayout() {
+function renderLayout(options?: { runtimeStatus?: "idle" | "failed"; canStop?: boolean }) {
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 
   return render(
@@ -34,7 +34,8 @@ function renderLayout() {
       connectionContent={<div>连接内容</div>}
       testContent={<div>测试内容</div>}
       logs={logs}
-      runtimeStatus="idle"
+      runtimeStatus={options?.runtimeStatus ?? "idle"}
+      canStop={options?.canStop ?? false}
       runtimeMetrics={runtimeMetrics}
       onStop={vi.fn()}
     />,
@@ -63,5 +64,11 @@ describe("AppLayout", () => {
 
     expect(statusBarRule).toContain("white-space: nowrap");
     expect(statusMetricRule).toContain("flex: 0 0 auto");
+  });
+
+  it("keeps the stop action available whenever the backend still has a process", () => {
+    renderLayout({ runtimeStatus: "failed", canStop: true });
+
+    expect(screen.getByRole("button", { name: "停止" })).toBeEnabled();
   });
 });

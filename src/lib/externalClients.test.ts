@@ -5,6 +5,7 @@ import {
   checkRuntimeConnection,
   externalClientProfiles,
 } from "./externalClients";
+import type { RuntimeSnapshot } from "../api/tauri";
 
 describe("external client connection helpers", () => {
   it("builds OpenAI-compatible endpoint details from the active runtime", () => {
@@ -31,6 +32,64 @@ describe("external client connection helpers", () => {
 
     expect(connection.model).toBe("local");
     expect(connection.healthy).toBe(false);
+  });
+
+  it("uses the backend active launch instead of edited draft values", () => {
+    const snapshot: RuntimeSnapshot = {
+      status: "healthy",
+      pid: 42,
+      startedAt: "2026-07-21T00:00:00Z",
+      activeModelPath: "/models/a.gguf",
+      activeLaunch: {
+        binaryPath: "/bin/llama-server",
+        modelPath: "/models/a.gguf",
+        host: "127.0.0.1",
+        port: 8080,
+        parameters: {
+          ctxSize: 4096,
+          threads: "auto",
+          threadsBatch: "auto",
+          gpuLayers: "all",
+          batchSize: 512,
+          ubatchSize: 128,
+          flashAttention: "auto",
+          mmap: true,
+          mlock: false,
+          metrics: true,
+          idleSleepSeconds: 0,
+          mmprojPath: null,
+          mmprojOffload: true,
+        },
+        prometheusHints: {
+          kvSubstrings: [],
+          promptSubstrings: [],
+          generationAnyOf: [],
+          generationRequired: [],
+        },
+        startedAt: "2026-07-21T00:00:00Z",
+        modelId: "active-model",
+        serverCapabilities: null,
+      },
+      lastError: null,
+      metrics: {
+        cpuPercent: null,
+        memoryBytes: null,
+        tokensPerSecond: null,
+        promptTokensPerSecond: null,
+        kvCacheUsageRatio: null,
+      },
+      logs: [],
+    };
+
+    const connection = buildRuntimeConnection({
+      snapshot,
+      draftPort: 9090,
+      draftModelName: "b.gguf",
+    });
+
+    expect(connection.port).toBe(8080);
+    expect(connection.model).toBe("active-model");
+    expect(connection.source).toBe("active");
   });
 
   it("ships launcher-oriented profiles for common external clients", () => {

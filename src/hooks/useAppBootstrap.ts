@@ -1,6 +1,7 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 import type { MutableRefObject } from "react";
 import { loadSettings, resolveLlamaServerPath } from "../api/tauri";
+import type { AppSettings } from "../api/tauri";
 import { getProfileById } from "../lib/parameterSchema";
 import {
   MODEL_FAMILY_AUTO_PRESET_SOURCE_ID,
@@ -14,6 +15,7 @@ import {
   type ParameterProfile,
   type PrometheusHintsConfig,
   type StartupParameters,
+  type SamplingParameters,
 } from "../types/domain";
 
 const DEFAULT_PORT = 8080;
@@ -27,6 +29,8 @@ export interface AppBootstrapOptions {
   setProfileId: (id: ParameterProfile["id"]) => void;
   setParameterPresetSourceId: (id: ParameterPresetSourceId) => void;
   setStartupParameters: Dispatch<SetStateAction<StartupParameters>>;
+  setSampling: Dispatch<SetStateAction<SamplingParameters>>;
+  setUiSettings: Dispatch<SetStateAction<AppSettings["ui"]>>;
   setDirectories: (dirs: ModelDirectory[]) => void;
   setModels: (models: ModelEntry[]) => void;
   setSelectedModelPath: (path: string | null) => void;
@@ -43,6 +47,8 @@ export function useAppBootstrap({
   setProfileId,
   setParameterPresetSourceId,
   setStartupParameters,
+  setSampling,
+  setUiSettings,
   setDirectories,
   setModels,
   setSelectedModelPath,
@@ -54,25 +60,30 @@ export function useAppBootstrap({
     let cancelled = false;
     async function bootstrap() {
       try {
-        const settings = await loadSettings();
+        const envelope = await loadSettings();
         if (cancelled) return;
+        envelope.warnings.forEach((warning) => appendSystemLog(warning.message));
+        const settings = envelope.settings;
         const resolvedBinary = await resolveLlamaServerPath(settings.llamaServerPath);
         if (cancelled) return;
         setBinaryPath(resolvedBinary ?? settings.llamaServerPath);
-        setPort(settings.defaultPort || DEFAULT_PORT);
-        setPrometheusHints(settings.prometheusHints ?? emptyPrometheusHintsConfig());
-        const loadedProfile = getProfileById(settings.defaultPresetId || "max-capability");
+        setPort(settings.launchDraft.port || DEFAULT_PORT);
+        setPrometheusHints(settings.launchDraft.prometheusHints ?? emptyPrometheusHintsConfig());
+        const loadedProfile = getProfileById(
+          settings.launchDraft.profileId === "auto" ? "max-capability" : "custom",
+        );
         setProfileId(loadedProfile.id);
         setParameterPresetSourceId(
-          normalizeParameterPresetSourceId(settings.parameterPresetSourceId ?? MODEL_FAMILY_AUTO_PRESET_SOURCE_ID),
+          normalizeParameterPresetSourceId(
+            settings.launchDraft.parameterPresetSourceId ?? MODEL_FAMILY_AUTO_PRESET_SOURCE_ID,
+          ),
         );
-        setStartupParameters({
-          ...loadedProfile.parameters,
-          idleSleepSeconds: settings.idleSleepSeconds,
-        });
+        setStartupParameters(settings.launchDraft.parameters);
+        setSampling(settings.sampling);
+        setUiSettings(settings.ui);
 
         if (settings.modelDirectories.length > 0) {
-          await scanDirectories(settings.modelDirectories, settings.lastSelectedModelPath);
+          await scanDirectories(settings.modelDirectories, settings.launchDraft.selectedModelPath);
         } else {
           setDirectories([]);
           setModels([]);
@@ -103,5 +114,7 @@ export function useAppBootstrap({
     setPrometheusHints,
     setSelectedModelPath,
     setStartupParameters,
+    setSampling,
+    setUiSettings,
   ]);
 }

@@ -41,8 +41,8 @@ const customParameters: StartupParameters = {
 export const builtInProfiles: ParameterProfile[] = [
   {
     id: "max-capability",
-    name: "最大能力",
-    description: "按模型元数据自动拉满上下文，并给测试聊天设置安全输出上限。",
+    name: "自动配置",
+    description: "按模型元数据设置上下文，并为提示词和历史保留充足空间。",
     parameters: {
       ...customParameters,
       ctxSize: FALLBACK_MAX_CONTEXT_SIZE,
@@ -77,8 +77,8 @@ export function resolveModelContextLimit(modelContextLength: number | null | und
 
 export function calculateMaxOutputTokens(ctxSize: number): number {
   const safeCtx = Number.isFinite(ctxSize) && ctxSize > 0 ? Math.floor(ctxSize) : FALLBACK_MAX_CONTEXT_SIZE;
-  const reserve = Math.max(256, Math.ceil(safeCtx * 0.08));
-  return clampToStep(safeCtx - reserve, 64, Math.max(64, safeCtx - 1), 64);
+  const recommended = Math.floor(safeCtx * 0.25);
+  return clampToStep(recommended, 256, Math.min(2048, Math.max(256, safeCtx - 1)), 64);
 }
 
 export function buildMaxCapabilityStartupParameters(
@@ -190,7 +190,7 @@ export function validateLaunchConfig(config: LaunchConfig): ValidationResult {
 
 export function buildCommandPreview(config: LaunchConfig): string[] {
   const args = [
-    "llama-server",
+    config.binaryPath?.trim() || "llama-server",
     "--model",
     config.modelPath ?? "",
     "--host",

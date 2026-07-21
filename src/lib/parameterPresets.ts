@@ -50,8 +50,8 @@ export const parameterPresetSources: ParameterPresetSource[] = [
   },
   {
     id: "user:low-memory",
-    name: "低内存",
-    description: "降低 batch/micro-batch 并关闭 Flash Attention，优先提高兼容性。",
+    name: "兼容模式",
+    description: "降低 batch/micro-batch，并让 llama-server 自动选择 Flash Attention。",
   },
 ];
 
@@ -183,8 +183,8 @@ const userPresets: Record<UserParameterPresetId, ParameterPresetDefinition> = {
   },
   "user:low-memory": {
     id: "user:low-memory",
-    name: "低内存",
-    description: "降低 batch/micro-batch 并关闭 Flash Attention。",
+    name: "兼容模式",
+    description: "降低 batch/micro-batch，并让 llama-server 自动选择兼容设置。",
     sampling: {
       temperature: 0.6,
       topP: 0.9,
@@ -195,7 +195,7 @@ const userPresets: Record<UserParameterPresetId, ParameterPresetDefinition> = {
     parameters: {
       batchSize: 512,
       ubatchSize: 128,
-      flashAttention: "off",
+      flashAttention: "auto",
       mlock: false,
     },
   },

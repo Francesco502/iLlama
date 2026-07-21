@@ -6,21 +6,69 @@ import type {
   PrometheusHintsConfig,
   RuntimeMetrics,
   RuntimeStatus,
+  SamplingParameters,
+  StartupParameters,
   ValidationResult,
 } from "../types/domain";
 
 export interface AppSettings {
-  schemaVersion: number;
+  schemaVersion: 3;
   modelDirectories: string[];
   llamaServerPath: string | null;
-  defaultPresetId: string;
-  parameterPresetSourceId?: string;
-  lastSelectedModelPath: string | null;
-  autoPort: boolean;
-  defaultPort: number;
-  idleSleepSeconds: number;
-  prometheusHints?: PrometheusHintsConfig;
-  showInMenuBar?: boolean;
+  launchDraft: {
+    profileId: "auto" | "custom";
+    parameterPresetSourceId: string;
+    selectedModelPath: string | null;
+    autoPort: boolean;
+    port: number;
+    parameters: StartupParameters;
+    prometheusHints: PrometheusHintsConfig;
+  };
+  sampling: SamplingParameters;
+  ui: {
+    showInMenuBar: boolean;
+    logPanelOpen: boolean;
+    logPanelHeight: number;
+    advancedOpen: boolean;
+  };
+}
+
+export interface SettingsWarning {
+  code: string;
+  message: string;
+  recoveryAction: string;
+}
+
+export interface SettingsEnvelope {
+  settings: AppSettings;
+  warnings: SettingsWarning[];
+}
+
+export interface ActiveLaunchSnapshot {
+  binaryPath: string;
+  modelPath: string;
+  host: "127.0.0.1";
+  port: number;
+  parameters: StartupParameters;
+  prometheusHints: PrometheusHintsConfig;
+  startedAt: string;
+  modelId: string | null;
+  serverCapabilities: ServerCapabilities | null;
+}
+
+export interface ServerCapabilities {
+  binaryPath: string;
+  versionText: string | null;
+  supportedFlags: string[];
+  status: "compatible" | "limited" | "invalid";
+  warnings: string[];
+}
+
+export interface CommandSpec {
+  executable: string;
+  args: string[];
+  warnings: string[];
+  capabilities: ServerCapabilities;
 }
 
 export interface RuntimeSnapshot {
@@ -28,6 +76,7 @@ export interface RuntimeSnapshot {
   pid: number | null;
   startedAt: string | null;
   activeModelPath: string | null;
+  activeLaunch: ActiveLaunchSnapshot | null;
   lastError: string | null;
   metrics: RuntimeMetrics;
   logs: LogEntry[];
@@ -42,8 +91,8 @@ export function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
 }
 
-export async function loadSettings(): Promise<AppSettings> {
-  return invoke<AppSettings>("load_settings_command");
+export async function loadSettings(): Promise<SettingsEnvelope> {
+  return invoke<SettingsEnvelope>("load_settings_command");
 }
 
 export async function resolveLlamaServerPath(requestedPath?: string | null): Promise<string | null> {
@@ -52,6 +101,10 @@ export async function resolveLlamaServerPath(requestedPath?: string | null): Pro
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
   await invoke("save_settings_command", { settings });
+}
+
+export async function patchSettings(patch: Partial<AppSettings>): Promise<SettingsEnvelope> {
+  return invoke<SettingsEnvelope>("patch_settings_command", { patch });
 }
 
 export async function scanModelDirectory(path: string): Promise<ModelEntry[]> {
@@ -64,6 +117,14 @@ export async function validateLaunchConfig(config: LaunchConfig): Promise<Valida
 
 export async function buildCommandArgs(config: LaunchConfig): Promise<string[]> {
   return invoke<string[]>("build_command_args_command", { config });
+}
+
+export async function probeLlamaServer(path: string): Promise<ServerCapabilities> {
+  return invoke<ServerCapabilities>("probe_llama_server_command", { path });
+}
+
+export async function buildCommandSpec(config: LaunchConfig): Promise<CommandSpec> {
+  return invoke<CommandSpec>("build_command_spec_command", { config });
 }
 
 export async function startLlama(config: LaunchConfig): Promise<RuntimeSnapshot> {

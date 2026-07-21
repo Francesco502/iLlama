@@ -13,6 +13,12 @@ export interface RuntimeConnectionInput {
   healthy: boolean;
 }
 
+export interface RuntimeConnectionSnapshotInput {
+  snapshot: RuntimeSnapshot;
+  draftPort: number;
+  draftModelName: string | null;
+}
+
 export interface RuntimeConnection {
   host: "127.0.0.1";
   port: number;
@@ -22,6 +28,7 @@ export interface RuntimeConnection {
   apiKey: string;
   model: string;
   healthy: boolean;
+  source: "active" | "draft";
 }
 
 export interface ExternalClientProfile {
@@ -84,11 +91,17 @@ export const externalClientProfiles: ExternalClientProfile[] = [
   },
 ];
 
-export function buildRuntimeConnection({
-  port,
-  modelName,
-  healthy,
-}: RuntimeConnectionInput): RuntimeConnection {
+export function buildRuntimeConnection(
+  input: RuntimeConnectionInput | RuntimeConnectionSnapshotInput,
+): RuntimeConnection {
+  const active = "snapshot" in input ? input.snapshot.activeLaunch : null;
+  const port = active?.port ?? ("snapshot" in input ? input.draftPort : input.port);
+  const modelName = active
+    ? active.modelId
+    : "snapshot" in input
+      ? input.draftModelName
+      : input.modelName;
+  const healthy = "snapshot" in input ? input.snapshot.status === "healthy" : input.healthy;
   const baseUrl = `http://127.0.0.1:${port}/v1`;
   return {
     host: "127.0.0.1",
@@ -97,8 +110,9 @@ export function buildRuntimeConnection({
     chatCompletionsUrl: `${baseUrl}/chat/completions`,
     modelsUrl: `${baseUrl}/models`,
     apiKey: "llama",
-    model: modelName?.trim() || "local",
+    model: modelName?.trim() || (active ? "等待模型 ID" : "local"),
     healthy,
+    source: active ? "active" : "draft",
   };
 }
 
@@ -215,3 +229,4 @@ function describeEndpointFailure(result: EndpointResult): string {
   }
   return "未知错误";
 }
+import type { RuntimeSnapshot } from "../api/tauri";
