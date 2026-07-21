@@ -56,13 +56,15 @@ fn classifies_ready_limited_and_invalid_models_and_reports_progress_envelope() {
     let root = dir.path();
     write_minimal_gguf(&root.join("ready.gguf"));
 
-    let mut limited = header(3, 1, 1);
-    write_string(&mut limited, "test.large_array");
-    limited.extend_from_slice(&9_u32.to_le_bytes());
-    limited.extend_from_slice(&0_u32.to_le_bytes());
-    limited.extend_from_slice(&(2 * 1024 * 1024_u64).to_le_bytes());
-    limited.resize(limited.len() + 2 * 1024 * 1024, 7);
-    append_f32_tensor(&mut limited, "weight", &[2], &[0; 8]);
+    let mut limited = header(3, 1, 0);
+    write_string(&mut limited, "future-weight");
+    limited.extend_from_slice(&1_u32.to_le_bytes());
+    limited.extend_from_slice(&1_u64.to_le_bytes());
+    limited.extend_from_slice(&u32::MAX.to_le_bytes());
+    limited.extend_from_slice(&0_u64.to_le_bytes());
+    let padding = (32 - (limited.len() % 32)) % 32;
+    limited.resize(limited.len() + padding, 0);
+    limited.push(0);
     fs::write(root.join("limited.gguf"), limited).unwrap();
 
     let mut invalid = minimal_valid_gguf(3);

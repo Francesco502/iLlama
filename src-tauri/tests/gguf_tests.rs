@@ -2,7 +2,7 @@ use illama_lib::gguf::{inspect_gguf, GgufStatus};
 use std::{fs, io::Write};
 
 #[test]
-fn oversized_primitive_arrays_stop_at_the_metadata_budget() {
+fn oversized_primitive_arrays_are_invalid_when_tensor_structure_cannot_be_verified() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("large-array.gguf");
     let mut bytes = Vec::new();
@@ -23,12 +23,12 @@ fn oversized_primitive_arrays_stop_at_the_metadata_budget() {
 
     let inspection = inspect_gguf(&path);
 
-    assert_eq!(inspection.status, GgufStatus::Limited);
+    assert_eq!(inspection.status, GgufStatus::Invalid);
     assert!(inspection.warning.unwrap().contains("budget"));
 }
 
 #[test]
-fn oversized_string_arrays_stop_at_the_element_budget() {
+fn oversized_string_arrays_are_invalid_when_tensor_structure_cannot_be_verified() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("large-string-array.gguf");
     let mut bytes = header(3, 1, 1);
@@ -44,7 +44,7 @@ fn oversized_string_arrays_stop_at_the_element_budget() {
 
     let inspection = inspect_gguf(&path);
 
-    assert_eq!(inspection.status, GgufStatus::Limited);
+    assert_eq!(inspection.status, GgufStatus::Invalid);
     assert!(inspection.warning.unwrap().contains("element budget"));
 }
 
@@ -200,6 +200,24 @@ fn rejects_structurally_impossible_header_counts() {
 
     assert_eq!(inspection.status, GgufStatus::Invalid);
     assert!(inspection.warning.unwrap().contains("tensor count"));
+}
+
+#[test]
+fn rejects_tensor_counts_above_the_bounded_inspection_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("too-many-tensors.gguf");
+    fs::write(&path, header(3, 100_001, 0)).unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(24 + 100_001 * 32)
+        .unwrap();
+
+    let inspection = inspect_gguf(&path);
+
+    assert_eq!(inspection.status, GgufStatus::Invalid);
+    assert!(inspection.warning.unwrap().contains("inspection limit"));
 }
 
 fn header(version: u32, tensor_count: u64, metadata_count: u64) -> Vec<u8> {

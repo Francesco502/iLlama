@@ -38,6 +38,7 @@ const MAX_METADATA_STRING_ELEMENTS: u64 = 262_144;
 const DEFAULT_ALIGNMENT: u64 = 32;
 const MAX_TENSOR_NAME_BYTES: u64 = 64;
 const MAX_TENSOR_DIMENSIONS: u32 = 4;
+const MAX_INSPECTED_TENSORS: u64 = 100_000;
 
 pub fn read_gguf_metadata(path: &Path) -> io::Result<GgufMetadata> {
     let inspection = inspect_gguf(path);
@@ -92,6 +93,11 @@ pub fn inspect_gguf(path: &Path) -> GgufInspection {
     if tensor_count == 0 {
         return invalid_inspection("GGUF model declares zero tensors".to_string());
     }
+    if tensor_count > MAX_INSPECTED_TENSORS {
+        return invalid_inspection(format!(
+            "GGUF tensor count exceeds the inspection limit of {MAX_INSPECTED_TENSORS}"
+        ));
+    }
     let mut metadata = GgufMetadata {
         version,
         ..GgufMetadata::default()
@@ -103,18 +109,17 @@ pub fn inspect_gguf(path: &Path) -> GgufInspection {
         if let Err(error) =
             read_metadata_entry(&mut file, &mut metadata, &mut alignment, &mut budget)
         {
-            return inspection_from_parse_error(error, metadata);
+            return invalid_inspection(format!(
+                "GGUF tensor structure cannot be verified after metadata parsing stopped: {}",
+                parse_error_message(error)
+            ));
         }
     }
 
     if metadata_count > MAX_INSPECTED_METADATA_ENTRIES {
-        return GgufInspection {
-            status: GgufStatus::Limited,
-            metadata: Some(metadata),
-            warning: Some(format!(
-                "GGUF metadata exceeds the inspection limit of {MAX_INSPECTED_METADATA_ENTRIES} entries"
-            )),
-        };
+        return invalid_inspection(format!(
+            "GGUF tensor structure cannot be verified because metadata exceeds the inspection limit of {MAX_INSPECTED_METADATA_ENTRIES} entries"
+        ));
     }
 
     if alignment == 0 || !alignment.is_multiple_of(8) {
@@ -142,6 +147,12 @@ fn inspection_from_parse_error(error: ParseError, metadata: GgufMetadata) -> Ggu
             warning: Some(message),
         },
         ParseError::Invalid(message) => invalid_inspection(message),
+    }
+}
+
+fn parse_error_message(error: ParseError) -> String {
+    match error {
+        ParseError::Limited(message) | ParseError::Invalid(message) => message,
     }
 }
 
