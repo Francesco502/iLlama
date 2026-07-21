@@ -1347,6 +1347,10 @@ button { cursor: default; }
   display: inline-flex;
   align-items: center;
   cursor: help;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
 }
 .tooltip-icon {
   color: var(--muted);
@@ -1380,7 +1384,8 @@ button { cursor: default; }
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
-.tooltip-wrapper:hover::after {
+.tooltip-wrapper:hover::after,
+.tooltip-wrapper:focus-visible::after {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }

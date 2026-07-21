@@ -1,4 +1,5 @@
 import { FileSearch, Settings2, HelpCircle } from "lucide-react";
+import { useId } from "react";
 import { builtInProfiles, resolveModelContextLimit } from "../lib/parameterSchema";
 import type { ParameterPresetSource, ParameterPresetSourceId } from "../lib/parameterPresets";
 import type { ParameterProfile, PrometheusHintsConfig, StartupParameters, ValidationResult } from "../types/domain";
@@ -50,9 +51,15 @@ export function ParameterPanel({
         <Settings2 size={16} />
         <span>参数配置</span>
       </div>
-      <div className="segmented-control" aria-label="启动预设">
+      <div className="segmented-control" role="group" aria-label="启动预设">
         {builtInProfiles.map((item) => (
-          <button key={item.id} type="button" data-active={item.id === profile.id} onClick={() => onProfileChange(item.id)}>
+          <button
+            key={item.id}
+            type="button"
+            aria-pressed={item.id === profile.id}
+            data-active={item.id === profile.id}
+            onClick={() => onProfileChange(item.id)}
+          >
             {item.name}
           </button>
         ))}
@@ -68,6 +75,7 @@ export function ParameterPanel({
             tooltip="选择 App 内置模型族参数或用户常用 preset；切换后会覆盖采样、Flash Attention 和部分 batch 设置。"
           />
           <select
+            aria-label="参数来源"
             value={parameterPresetSourceId}
             onChange={(event) => onParameterPresetSourceChange(event.target.value as ParameterPresetSourceId)}
           >
@@ -265,15 +273,34 @@ export function ParameterPanel({
 }
 
 function FieldLabel({ label, tooltip }: { label: string; tooltip?: string }) {
+  const tooltipId = useId();
   if (!tooltip) {
     return <span>{label}</span>;
   }
   return (
     <span className="field-label-container">
       <span>{label}</span>
-      <span className="tooltip-wrapper" data-tooltip={tooltip} onClick={(e) => e.stopPropagation()}>
+      <span
+        className="tooltip-wrapper"
+        role="button"
+        tabIndex={0}
+        aria-label={`${label}说明`}
+        aria-describedby={tooltipId}
+        data-tooltip={tooltip}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
         <HelpCircle size={12} className="tooltip-icon" />
       </span>
+      <span className="visually-hidden" id={tooltipId} role="tooltip">{tooltip}</span>
     </span>
   );
 }
@@ -365,7 +392,7 @@ function NumberField({
   return (
     <label className="field">
       <FieldLabel label={label} tooltip={tooltip} />
-      <input inputMode="numeric" min={0} onChange={(e) => onChange(Number.parseInt(e.target.value || "0", 10))} type="number" value={value} />
+      <input aria-label={label} inputMode="numeric" min={0} onChange={(e) => onChange(Number.parseInt(e.target.value || "0", 10))} type="number" value={value} />
     </label>
   );
 }
@@ -387,7 +414,7 @@ function TextField({
     <label className="field">
       <FieldLabel label={label} tooltip={tooltip} />
       <div className="input-with-presets">
-        <input onChange={(e) => onChange(e.target.value)} value={value} />
+        <input aria-label={label} onChange={(e) => onChange(e.target.value)} value={value} />
         {presets && presets.length > 0 && (
           <div className="preset-badges">
             {presets.map((preset) => (
@@ -424,7 +451,7 @@ function SelectField({
   return (
     <label className="field">
       <FieldLabel label={label} tooltip={tooltip} />
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
       </select>
     </label>
@@ -444,9 +471,19 @@ function ToggleRow({
   onToggle?: () => void;
   tooltip?: string;
 }) {
+  const descriptionId = useId();
   return (
-    <button className="toggle-row" data-warning={warning} type="button" onClick={onToggle}>
-      <FieldLabel label={label} tooltip={tooltip} />
+    <button
+      className="toggle-row"
+      data-warning={warning}
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      aria-describedby={tooltip ? descriptionId : undefined}
+      onClick={onToggle}
+    >
+      <span>{label}</span>
+      {tooltip ? <span className="visually-hidden" id={descriptionId}>{tooltip}</span> : null}
       <span className="toggle" data-enabled={enabled}><span /></span>
     </button>
   );

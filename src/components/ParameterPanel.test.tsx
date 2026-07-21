@@ -32,7 +32,7 @@ describe("ParameterPanel", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "自动端口" }));
+    await user.click(screen.getByRole("switch", { name: /自动端口/ }));
     expect(onAutoPortChange).toHaveBeenCalledWith(true);
   });
 
@@ -74,6 +74,7 @@ describe("ParameterPanel", () => {
 
     expect(screen.getByRole("button", { name: "自动配置" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "自定义" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "自定义" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: "低内存" })).not.toBeInTheDocument();
 
     const ctxInput = screen.getByLabelText("上下文长度");
@@ -84,6 +85,33 @@ describe("ParameterPanel", () => {
       ...profile.parameters,
       ctxSize: 16384,
     });
+  });
+
+  it("exposes toggles and tooltip help to keyboard and assistive technology", () => {
+    const profile = getProfileById("custom");
+    render(
+      <ParameterPanel
+        profile={profile}
+        parameters={profile.parameters}
+        port={8080}
+        onPortChange={vi.fn()}
+        prometheusHints={emptyPrometheusHintsConfig()}
+        parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+        parameterPresetSources={parameterPresetSources}
+        appliedParameterPresetName="Llama 通用"
+        onParameterPresetSourceChange={vi.fn()}
+        onPrometheusHintsChange={vi.fn()}
+        onParametersChange={vi.fn()}
+        onProfileChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("switch", { name: /内存映射 mmap/ })).toHaveAttribute(
+      "aria-checked",
+      String(profile.parameters.mmap),
+    );
+    const help = screen.getByRole("button", { name: "CPU 线程说明" });
+    expect(help).toHaveAttribute("aria-describedby");
   });
 
   it("shows maximum capability as an automatic read-only context mode", () => {
