@@ -91,7 +91,9 @@ export interface HealthStatus {
 export interface ModelScanProgress {
   requestId: string;
   directory: string;
+  /** Regular files visited by the non-hidden directory walk, including non-GGUF/mmproj files. */
   filesScanned: number;
+  /** Available non-mmproj GGUF models; invalid candidates are excluded. */
   modelsFound: number;
 }
 
@@ -99,6 +101,8 @@ export interface ModelScanResult {
   requestId: string;
   directory: string;
   models: ModelEntry[];
+  filesScanned: number;
+  modelsFound: number;
 }
 
 export function isTauriRuntime(): boolean {

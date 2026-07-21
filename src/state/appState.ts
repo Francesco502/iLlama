@@ -95,9 +95,7 @@ export function buildSettingsSnapshot({
 }: SettingsSnapshotInput): AppSettings {
   return {
     schemaVersion: 3,
-    modelDirectories: directories
-      .filter((directory) => directory.status === "ready")
-      .map((directory) => directory.path),
+    modelDirectories: directories.map((directory) => directory.path),
     llamaServerPath: binaryPath,
     launchDraft: {
       profileId: profileId === "max-capability" ? "auto" : "custom",

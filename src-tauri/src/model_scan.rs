@@ -43,6 +43,10 @@ pub struct ModelScanResult {
     pub request_id: String,
     pub directory: String,
     pub models: Vec<ModelEntry>,
+    /// Regular files visited by the directory walker, including non-GGUF and mmproj files.
+    pub files_scanned: u64,
+    /// Available non-mmproj GGUF models. Invalid candidates are not counted as found models.
+    pub models_found: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,7 +82,12 @@ pub fn scan_model_directory_with_progress(
         .filter_entry(|entry| !is_hidden_dir(entry))
     {
         let entry = entry?;
-        if !entry.file_type().is_file() || !is_gguf(entry.path()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        progress.files_scanned = progress.files_scanned.saturating_add(1);
+        on_progress(&progress);
+        if !is_gguf(entry.path()) {
             continue;
         }
 
@@ -92,7 +101,12 @@ pub fn scan_model_directory_with_progress(
     for path in model_paths {
         let candidates = mmproj_candidates_for_model(&path, &mmproj_paths);
         match read_model_entry(&root, &path, candidates.clone()) {
-            Ok(entry) => models.push(entry),
+            Ok(entry) => {
+                if entry.available {
+                    progress.models_found = progress.models_found.saturating_add(1);
+                }
+                models.push(entry);
+            }
             Err(error) => {
                 let file_name = path
                     .file_name()
@@ -122,8 +136,6 @@ pub fn scan_model_directory_with_progress(
                 });
             }
         }
-        progress.files_scanned += 1;
-        progress.models_found = models.len() as u64;
         on_progress(&progress);
     }
 
@@ -132,6 +144,8 @@ pub fn scan_model_directory_with_progress(
         request_id,
         directory,
         models,
+        files_scanned: progress.files_scanned,
+        models_found: progress.models_found,
     })
 }
 

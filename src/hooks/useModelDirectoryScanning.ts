@@ -32,42 +32,43 @@ export function useModelDirectoryScanning({
   appendSystemLog,
   directories,
   setDirectories,
-  models,
   setModels,
   selectedModelPath,
   setSelectedModelPath,
   setStartupParameters,
 }: UseModelDirectoryScanningOptions): UseModelDirectoryScanningResult {
   const [scanning, setScanning] = useState(false);
-  const generationRef = useRef(0);
   const requestSequenceRef = useRef(0);
   const activeRequestIdsRef = useRef(new Map<string, string>());
+  const activeOperationCountRef = useRef(0);
 
-  const beginGeneration = useCallback(() => {
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    activeRequestIdsRef.current.clear();
-    setScanning(true);
-    return generation;
-  }, []);
-
-  const beginDirectoryRequest = useCallback((generation: number, path: string) => {
-    const requestId = `model-scan-${generation}-${requestSequenceRef.current + 1}`;
+  const beginDirectoryRequest = useCallback((path: string) => {
+    const requestId = `model-scan-${requestSequenceRef.current + 1}`;
     requestSequenceRef.current += 1;
     activeRequestIdsRef.current.set(path, requestId);
+    activeOperationCountRef.current += 1;
+    setScanning(true);
     return requestId;
   }, []);
 
-  const isCurrentRequest = useCallback((generation: number, path: string, requestId: string) => (
-    generationRef.current === generation && activeRequestIdsRef.current.get(path) === requestId
+  const finishDirectoryRequest = useCallback((path: string, requestId: string) => {
+    if (activeRequestIdsRef.current.get(path) === requestId) {
+      activeRequestIdsRef.current.delete(path);
+    }
+    activeOperationCountRef.current = Math.max(0, activeOperationCountRef.current - 1);
+    setScanning(activeOperationCountRef.current > 0);
+  }, []);
+
+  const isCurrentRequest = useCallback((path: string, requestId: string) => (
+    activeRequestIdsRef.current.get(path) === requestId
   ), []);
 
   const applyProgress = useCallback(
-    (generation: number, path: string, requestId: string, progress: ModelScanProgress) => {
+    (path: string, requestId: string, progress: ModelScanProgress) => {
       if (
         progress.requestId !== requestId ||
         progress.directory !== path ||
-        !isCurrentRequest(generation, path, requestId)
+        !isCurrentRequest(path, requestId)
       ) {
         return;
       }
@@ -83,53 +84,93 @@ export function useModelDirectoryScanning({
     [isCurrentRequest, setDirectories],
   );
 
+  const markDirectoryMissing = useCallback((path: string, message: string) => {
+    setDirectories((current) => {
+      const progress = current.find((directory) => directory.path === path)?.progress;
+      return upsertDirectory(current, {
+        path,
+        status: "missing",
+        ...(progress ? { progress } : {}),
+        lastError: message,
+      });
+    });
+  }, [setDirectories]);
+
   const scanDirectories = useCallback(
     async (paths: string[], preferredModelPath: string | null) => {
-      const generation = beginGeneration();
-      setDirectories(paths.map((path) => ({
-        path,
-        status: "scanning",
-        progress: { filesScanned: 0, modelsFound: 0 },
-      })));
-      const allModels: ModelEntry[] = [];
-      const nextDirectories: ModelDirectory[] = [];
+      const uniquePaths = [...new Set(paths)];
+      const requestIds = new Map(
+        uniquePaths.map((path) => [path, beginDirectoryRequest(path)]),
+      );
+      setDirectories((current) => uniquePaths.reduce(
+        (next, path) => upsertDirectory(next, {
+          path,
+          status: "scanning",
+          progress: { filesScanned: 0, modelsFound: 0 },
+        }),
+        current,
+      ));
+      setModels((current) => {
+        const next = uniquePaths.reduce(
+          (remaining, path) => removeDirectoryModels(remaining, path),
+          current,
+        );
+        setSelectedModelPath((selected) => pickSelectedModelPath(next, preferredModelPath ?? selected));
+        return next;
+      });
+      setStartupParameters((current) => ({ ...current, mmprojPath: null }));
 
-      for (const path of paths) {
-        const requestId = beginDirectoryRequest(generation, path);
+      for (const path of uniquePaths) {
+        const requestId = requestIds.get(path)!;
+        if (!isCurrentRequest(path, requestId)) {
+          finishDirectoryRequest(path, requestId);
+          continue;
+        }
         appendSystemLog(`开始扫描：${path}`);
         try {
           const result = await scanModelDirectory(path, requestId, (progress) => {
-            applyProgress(generation, path, requestId, progress);
+            applyProgress(path, requestId, progress);
           });
-          if (!isCurrentRequest(generation, path, requestId) || result.requestId !== requestId) return;
-          allModels.push(...result.models);
-          nextDirectories.push({
-            path,
-            status: "ready",
-            progress: { filesScanned: result.models.length, modelsFound: result.models.length },
-          });
-          appendSystemLog(`扫描完成：${path}，发现 ${result.models.length} 个 GGUF 模型。`);
+          if (
+            isCurrentRequest(path, requestId) &&
+            result.requestId === requestId &&
+            result.directory === path
+          ) {
+            setModels((current) => {
+              const merged = mergeScannedModels(current, path, result.models);
+              setSelectedModelPath((selected) => (
+                pickSelectedModelPath(merged, preferredModelPath ?? selected)
+              ));
+              return merged;
+            });
+            setDirectories((current) => upsertDirectory(current, {
+              path,
+              status: "ready",
+              progress: {
+                filesScanned: result.filesScanned,
+                modelsFound: result.modelsFound,
+              },
+            }));
+            appendSystemLog(`扫描完成：${path}，发现 ${result.modelsFound} 个 GGUF 模型。`);
+          }
         } catch (error) {
-          if (!isCurrentRequest(generation, path, requestId)) return;
-          const message = error instanceof Error ? error.message : String(error);
-          nextDirectories.push({ path, status: "missing", lastError: message });
-          appendSystemLog(message);
+          if (isCurrentRequest(path, requestId)) {
+            const message = error instanceof Error ? error.message : String(error);
+            markDirectoryMissing(path, message);
+            appendSystemLog(message);
+          }
+        } finally {
+          finishDirectoryRequest(path, requestId);
         }
       }
-
-      if (generationRef.current !== generation) return;
-      setDirectories(nextDirectories);
-      setModels(allModels);
-      setSelectedModelPath(pickSelectedModelPath(allModels, preferredModelPath));
-      setStartupParameters((current) => ({ ...current, mmprojPath: null }));
-      setScanning(false);
     },
     [
       appendSystemLog,
       applyProgress,
       beginDirectoryRequest,
-      beginGeneration,
+      finishDirectoryRequest,
       isCurrentRequest,
+      markDirectoryMissing,
       setDirectories,
       setModels,
       setSelectedModelPath,
@@ -139,8 +180,7 @@ export function useModelDirectoryScanning({
 
   const scanDirectory = useCallback(
     async (path: string) => {
-      const generation = beginGeneration();
-      const requestId = beginDirectoryRequest(generation, path);
+      const requestId = beginDirectoryRequest(path);
       setDirectories((current) => upsertDirectory(current, {
         path,
         status: "scanning",
@@ -149,9 +189,13 @@ export function useModelDirectoryScanning({
       appendSystemLog(`开始扫描：${path}`);
       try {
         const result = await scanModelDirectory(path, requestId, (progress) => {
-          applyProgress(generation, path, requestId, progress);
+          applyProgress(path, requestId, progress);
         });
-        if (!isCurrentRequest(generation, path, requestId) || result.requestId !== requestId) return;
+        if (
+          !isCurrentRequest(path, requestId) ||
+          result.requestId !== requestId ||
+          result.directory !== path
+        ) return;
         setModels((current) => {
           const merged = mergeScannedModels(current, path, result.models);
           setSelectedModelPath((currentSelected) => pickSelectedModelPath(merged, currentSelected));
@@ -161,28 +205,28 @@ export function useModelDirectoryScanning({
         setDirectories((current) => upsertDirectory(current, {
           path,
           status: "ready",
-          progress: { filesScanned: result.models.length, modelsFound: result.models.length },
+          progress: {
+            filesScanned: result.filesScanned,
+            modelsFound: result.modelsFound,
+          },
         }));
-        appendSystemLog(`扫描完成，发现 ${result.models.length} 个 GGUF 模型。`);
+        appendSystemLog(`扫描完成，发现 ${result.modelsFound} 个 GGUF 模型。`);
       } catch (error) {
-        if (!isCurrentRequest(generation, path, requestId)) return;
+        if (!isCurrentRequest(path, requestId)) return;
         const message = error instanceof Error ? error.message : String(error);
-        setDirectories((current) => upsertDirectory(current, {
-          path,
-          status: "missing",
-          lastError: message,
-        }));
+        markDirectoryMissing(path, message);
         appendSystemLog(message);
       } finally {
-        if (isCurrentRequest(generation, path, requestId)) setScanning(false);
+        finishDirectoryRequest(path, requestId);
       }
     },
     [
       appendSystemLog,
       applyProgress,
       beginDirectoryRequest,
-      beginGeneration,
+      finishDirectoryRequest,
       isCurrentRequest,
+      markDirectoryMissing,
       setDirectories,
       setModels,
       setSelectedModelPath,
@@ -202,18 +246,20 @@ export function useModelDirectoryScanning({
 
   const handleRemoveDirectory = useCallback(
     (path: string) => {
-      const nextModels = removeDirectoryModels(models, path);
+      activeRequestIdsRef.current.delete(path);
       setDirectories((current) => current.filter((d) => d.path !== path));
-      setModels(nextModels);
-      setSelectedModelPath((current) => pickSelectedModelPath(nextModels, current));
+      setModels((current) => {
+        const nextModels = removeDirectoryModels(current, path);
+        setSelectedModelPath((selected) => pickSelectedModelPath(nextModels, selected));
+        return nextModels;
+      });
       appendSystemLog(`已移除目录：${path}`);
     },
-    [appendSystemLog, models, setDirectories, setModels, setSelectedModelPath],
+    [appendSystemLog, setDirectories, setModels, setSelectedModelPath],
   );
 
   const handleRefresh = useCallback(async () => {
-    const firstReadyDirectory = directories.find((d) => d.status === "ready");
-    if (!firstReadyDirectory) {
+    if (directories.length === 0) {
       appendSystemLog("请先选择模型目录。");
       return;
     }
@@ -223,7 +269,7 @@ export function useModelDirectoryScanning({
       return;
     }
     await scanDirectories(
-      directories.filter((d) => d.status === "ready").map((d) => d.path),
+      directories.map((d) => d.path),
       selectedModelPath,
     );
   }, [appendSystemLog, directories, runningInTauri, scanDirectories, selectedModelPath, setModels]);

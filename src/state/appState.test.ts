@@ -147,7 +147,7 @@ describe("app state helpers", () => {
 
     expect(snapshot).toMatchObject({
       schemaVersion: 3,
-      modelDirectories: ["/models/a"],
+      modelDirectories: ["/models/a", "/models/b"],
       llamaServerPath: "/bin/llama-server",
       launchDraft: {
         profileId: "custom",
