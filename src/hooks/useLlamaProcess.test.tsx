@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeSnapshot } from "../api/tauri";
 import type { LaunchConfig } from "../types/domain";
-import { runtimeSnapshot, startLlama } from "../api/tauri";
+import { runtimeSnapshot, startLlama, stopLlama } from "../api/tauri";
 import { useLlamaProcess } from "./useLlamaProcess";
 
 vi.mock("../api/tauri", () => ({
@@ -72,6 +72,7 @@ describe("useLlamaProcess", () => {
     vi.useFakeTimers();
     vi.mocked(startLlama).mockResolvedValue(startingSnapshot);
     vi.mocked(runtimeSnapshot).mockResolvedValue(startingSnapshot);
+    vi.mocked(stopLlama).mockResolvedValue({ ...startingSnapshot, status: "stopped", pid: null });
   });
 
   afterEach(() => vi.useRealTimers());
@@ -98,5 +99,43 @@ describe("useLlamaProcess", () => {
     expect(result.current.snapshot.status).toBe("starting");
     expect(result.current.snapshot.pid).toBe(42);
     expect(result.current.canStop).toBe(true);
+  });
+
+  it("ignores an old in-flight poll after stop and a new start", async () => {
+    let resolveOldPoll!: (snapshot: RuntimeSnapshot) => void;
+    vi.mocked(runtimeSnapshot).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOldPoll = resolve;
+      }),
+    );
+    const configB = { ...config, modelPath: "/models/b.gguf", port: 9090 };
+    const snapshotB: RuntimeSnapshot = {
+      ...startingSnapshot,
+      pid: 84,
+      activeModelPath: configB.modelPath,
+      activeLaunch: {
+        ...startingSnapshot.activeLaunch!,
+        modelPath: configB.modelPath!,
+        port: configB.port,
+      },
+    };
+    vi.mocked(startLlama)
+      .mockResolvedValueOnce(startingSnapshot)
+      .mockResolvedValueOnce(snapshotB);
+    const { result } = renderHook(() =>
+      useLlamaProcess({ appendSystemLog: vi.fn(), mergeLogs: vi.fn() }),
+    );
+    await act(async () => result.current.handleStart(config));
+    act(() => vi.advanceTimersByTime(800));
+    await act(async () => result.current.handleStop());
+    await act(async () => result.current.handleStart(configB));
+
+    await act(async () => {
+      resolveOldPoll({ ...startingSnapshot, status: "stopped", pid: null, activeLaunch: null });
+      await Promise.resolve();
+    });
+
+    expect(result.current.snapshot.pid).toBe(84);
+    expect(result.current.snapshot.activeLaunch?.modelPath).toBe("/models/b.gguf");
   });
 });

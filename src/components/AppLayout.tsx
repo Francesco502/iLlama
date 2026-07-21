@@ -26,6 +26,10 @@ interface AppLayoutProps {
   canStop: boolean;
   onStop: () => void;
   onClearLogs?: () => void;
+  logOpen: boolean;
+  logHeight: number;
+  onLogOpenChange: (open: boolean) => void;
+  onLogHeightChange: (height: number) => void;
 }
 
 const statusLabel: Record<RuntimeStatus, string> = {
@@ -38,7 +42,6 @@ const statusLabel: Record<RuntimeStatus, string> = {
   stopped: "已停止",
 };
 
-const DEFAULT_LOG_DRAWER_HEIGHT = 180;
 const MIN_LOG_DRAWER_HEIGHT = 96;
 const MAX_LOG_DRAWER_HEIGHT = 480;
 const LOG_DRAWER_KEYBOARD_STEP = 24;
@@ -60,9 +63,11 @@ export function AppLayout({
   canStop,
   onStop,
   onClearLogs,
+  logOpen,
+  logHeight,
+  onLogOpenChange,
+  onLogHeightChange,
 }: AppLayoutProps) {
-  const [logOpen, setLogOpen] = useState(false);
-  const [logHeight, setLogHeight] = useState(DEFAULT_LOG_DRAWER_HEIGHT);
   const [logFilter, setLogFilter] = useState<"all" | "stdout" | "stderr" | "system">("all");
   const [logQuery, setLogQuery] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -79,8 +84,10 @@ export function AppLayout({
     if (!resizeState) {
       return;
     }
-    setLogHeight(clampLogDrawerHeight(resizeState.startHeight + resizeState.startY - event.clientY));
-  }, []);
+    onLogHeightChange(
+      clampLogDrawerHeight(resizeState.startHeight + resizeState.startY - event.clientY),
+    );
+  }, [onLogHeightChange]);
 
   const handleLogResizeEnd = useCallback(() => {
     stopLogResize();
@@ -105,22 +112,22 @@ export function AppLayout({
   function handleLogResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setLogHeight((height) => clampLogDrawerHeight(height + LOG_DRAWER_KEYBOARD_STEP));
+      onLogHeightChange(clampLogDrawerHeight(logHeight + LOG_DRAWER_KEYBOARD_STEP));
       return;
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setLogHeight((height) => clampLogDrawerHeight(height - LOG_DRAWER_KEYBOARD_STEP));
+      onLogHeightChange(clampLogDrawerHeight(logHeight - LOG_DRAWER_KEYBOARD_STEP));
       return;
     }
     if (event.key === "Home") {
       event.preventDefault();
-      setLogHeight(MIN_LOG_DRAWER_HEIGHT);
+      onLogHeightChange(MIN_LOG_DRAWER_HEIGHT);
       return;
     }
     if (event.key === "End") {
       event.preventDefault();
-      setLogHeight(MAX_LOG_DRAWER_HEIGHT);
+      onLogHeightChange(MAX_LOG_DRAWER_HEIGHT);
     }
   }
 
@@ -144,7 +151,7 @@ export function AppLayout({
     function handleKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         if (shortcutsOpen) setShortcutsOpen(false);
-        else if (logOpen) setLogOpen(false);
+        else if (logOpen) onLogOpenChange(false);
         return;
       }
       if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -158,7 +165,7 @@ export function AppLayout({
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [logOpen, shortcutsOpen]);
+  }, [logOpen, onLogOpenChange, shortcutsOpen]);
 
   return (
     <>
@@ -333,7 +340,7 @@ export function AppLayout({
             className="log-toggle-btn"
             type="button"
             data-open={logOpen}
-            onClick={() => setLogOpen(!logOpen)}
+            onClick={() => onLogOpenChange(!logOpen)}
           >
             日志 {logs.length}
             <ChevronDown size={12} />

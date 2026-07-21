@@ -15,7 +15,8 @@ export function useDebouncedSettingsPersist(
     (snapshot: AppSettings) => {
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
       persistTimerRef.current = setTimeout(() => {
-        void patchSettings(snapshot).catch((error) => {
+        const { showInMenuBar: _trayPreference, ...ui } = snapshot.ui;
+        void patchSettings({ ...snapshot, ui }).catch((error) => {
           appendSystemLog(error instanceof Error ? error.message : String(error));
         });
       }, 1500);

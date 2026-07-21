@@ -7,8 +7,14 @@ use std::{
     env, fs,
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
+    time::{SystemTime, UNIX_EPOCH},
 };
+
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default)]
 pub struct SettingsStore {
@@ -16,11 +22,12 @@ pub struct SettingsStore {
 }
 
 impl SettingsStore {
-    pub fn patch(&self, path: &Path, patch: serde_json::Value) -> io::Result<SettingsEnvelope> {
+    pub fn patch(&self, path: &Path, mut patch: serde_json::Value) -> io::Result<SettingsEnvelope> {
         let _guard = self
             .mutation_lock
             .lock()
             .map_err(|_| io::Error::other("设置存储锁定失败。"))?;
+        remove_tray_preference(&mut patch);
         patch_settings_to(path, patch)
     }
 
@@ -30,6 +37,48 @@ impl SettingsStore {
             .lock()
             .map_err(|_| io::Error::other("设置存储锁定失败。"))?;
         save_settings_to(path, settings)
+    }
+
+    pub fn set_tray_enabled<F>(
+        &self,
+        path: &Path,
+        enabled: bool,
+        mut apply_effect: F,
+    ) -> io::Result<SettingsEnvelope>
+    where
+        F: FnMut(bool) -> io::Result<()>,
+    {
+        let _guard = self
+            .mutation_lock
+            .lock()
+            .map_err(|_| io::Error::other("设置存储锁定失败。"))?;
+        let mut envelope = load_settings_envelope_from(path)?;
+        let previous = envelope.settings.ui.show_in_menu_bar;
+        if previous == enabled {
+            apply_effect(enabled)?;
+            return Ok(envelope);
+        }
+
+        apply_effect(enabled)?;
+        envelope.settings.ui.show_in_menu_bar = enabled;
+        if let Err(save_error) = save_settings_to(path, &envelope.settings) {
+            if let Err(compensation_error) = apply_effect(previous) {
+                return Err(io::Error::other(format!(
+                    "保存托盘设置失败：{save_error}；恢复托盘状态也失败：{compensation_error}"
+                )));
+            }
+            return Err(save_error);
+        }
+        Ok(envelope)
+    }
+}
+
+fn remove_tray_preference(patch: &mut serde_json::Value) {
+    if let Some(ui) = patch
+        .get_mut("ui")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        ui.remove("showInMenuBar");
     }
 }
 
@@ -159,6 +208,17 @@ pub fn load_settings_from(path: &Path) -> io::Result<AppSettings> {
 
 pub fn load_settings_envelope_from(path: &Path) -> io::Result<SettingsEnvelope> {
     if !path.exists() {
+        let backup = path.with_extension("json.bak");
+        if backup.exists() {
+            fs::rename(&backup, path)?;
+            let mut envelope = load_settings_envelope_from(path)?;
+            envelope.warnings.push(SettingsWarning {
+                code: "settings_backup_restored".to_string(),
+                message: "检测到未完成的 Windows 设置替换，已从备份恢复。".to_string(),
+                recovery_action: "none".to_string(),
+            });
+            return Ok(envelope);
+        }
         return Ok(SettingsEnvelope {
             settings: default_settings(),
             warnings: Vec::new(),
@@ -204,16 +264,44 @@ pub fn load_settings_envelope_from(path: &Path) -> io::Result<SettingsEnvelope> 
 pub fn save_settings_to(path: &Path, settings: &AppSettings) -> io::Result<()> {
     ensure_parent(path)?;
     let content = serde_json::to_string_pretty(settings)?;
-    let temp_path = path.with_extension("json.tmp");
-    let mut temp = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temp_path)?;
-    temp.write_all(content.as_bytes())?;
-    temp.sync_all()?;
-    drop(temp);
-    replace_file(&temp_path, path)
+    let (temp_path, mut temp) = create_unique_temp_file(path)?;
+    let result = (|| {
+        temp.write_all(content.as_bytes())?;
+        temp.sync_all()?;
+        drop(temp);
+        replace_file(&temp_path, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
+}
+
+fn create_unique_temp_file(path: &Path) -> io::Result<(PathBuf, fs::File)> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("settings.json");
+    loop {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let candidate = path.with_file_name(format!(
+            "{file_name}.tmp-{}-{nonce}-{counter}",
+            std::process::id()
+        ));
+        match fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&candidate)
+        {
+            Ok(file) => return Ok((candidate, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub fn patch_settings_to(path: &Path, patch: serde_json::Value) -> io::Result<SettingsEnvelope> {
@@ -294,7 +382,7 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
     settings.launch_draft.parameter_preset_source_id =
         normalize_parameter_preset_source(settings.launch_draft.parameter_preset_source_id);
     settings.launch_draft.port = settings.launch_draft.port.max(1024);
-    settings.ui.log_panel_height = settings.ui.log_panel_height.clamp(96, 360);
+    settings.ui.log_panel_height = settings.ui.log_panel_height.clamp(96, 480);
     settings.sampling.max_tokens = settings.sampling.max_tokens.max(1);
     settings
 }
@@ -339,20 +427,37 @@ fn merge_json_patch(target: &mut serde_json::Value, patch: serde_json::Value) {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn replace_file(temp_path: &Path, path: &Path) -> io::Result<()> {
-    #[cfg(target_os = "windows")]
-    if path.exists() {
-        let backup = path.with_extension("json.bak");
-        let _ = fs::remove_file(&backup);
-        fs::rename(path, &backup)?;
-        if let Err(error) = fs::rename(temp_path, path) {
-            let _ = fs::rename(&backup, path);
-            return Err(error);
-        }
-        let _ = fs::remove_file(backup);
-        return Ok(());
-    }
     fs::rename(temp_path, path)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(temp_path: &Path, path: &Path) -> io::Result<()> {
+    if !path.exists() {
+        return fs::rename(temp_path, path);
+    }
+
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_WRITE_THROUGH};
+
+    let replaced: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let replacement: Vec<u16> = temp_path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let success = unsafe {
+        ReplaceFileW(
+            replaced.as_ptr(),
+            replacement.as_ptr(),
+            std::ptr::null(),
+            REPLACEFILE_WRITE_THROUGH,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if success == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn default_parameter_preset_source_id() -> String {

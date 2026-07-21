@@ -25,6 +25,7 @@ export interface AppBootstrapOptions {
   appendSystemLog: (message: string) => void;
   hasBootstrappedRef: MutableRefObject<boolean>;
   setBinaryPath: (path: string | null) => void;
+  setAutoPort: (enabled: boolean) => void;
   setPort: (port: number) => void;
   setProfileId: (id: ParameterProfile["id"]) => void;
   setParameterPresetSourceId: (id: ParameterPresetSourceId) => void;
@@ -43,6 +44,7 @@ export function useAppBootstrap({
   appendSystemLog,
   hasBootstrappedRef,
   setBinaryPath,
+  setAutoPort,
   setPort,
   setProfileId,
   setParameterPresetSourceId,
@@ -67,6 +69,7 @@ export function useAppBootstrap({
         const resolvedBinary = await resolveLlamaServerPath(settings.llamaServerPath);
         if (cancelled) return;
         setBinaryPath(resolvedBinary ?? settings.llamaServerPath);
+        setAutoPort(settings.launchDraft.autoPort);
         setPort(settings.launchDraft.port || DEFAULT_PORT);
         setPrometheusHints(settings.launchDraft.prometheusHints ?? emptyPrometheusHintsConfig());
         const loadedProfile = getProfileById(
@@ -106,6 +109,7 @@ export function useAppBootstrap({
     runningInTauri,
     scanDirectories,
     setBinaryPath,
+    setAutoPort,
     setDirectories,
     setModels,
     setPort,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getProfileById } from "../lib/parameterSchema";
 import type { ModelDirectory, ModelEntry } from "../types/domain";
 import { emptyPrometheusHintsConfig } from "../types/domain";
@@ -9,6 +9,7 @@ import {
   reconcileMmprojPathForModel,
   removeDirectoryModels,
 } from "./appState";
+import * as appState from "./appState";
 
 const baseModel: ModelEntry = {
   path: "/models/a/model-a.gguf",
@@ -89,6 +90,7 @@ describe("app state helpers", () => {
       profileId: "custom",
       parameterPresetSourceId: "user:precise",
       selectedModelPath: "/models/a/model-a.gguf",
+      autoPort: false,
       port: 9090,
       startupParameters: parameters,
       sampling: { ...getProfileById("custom").sampling, maxTokens: 512 },
@@ -108,6 +110,7 @@ describe("app state helpers", () => {
       launchDraft: {
         profileId: "custom",
         parameterPresetSourceId: "user:precise",
+        autoPort: false,
         port: 9090,
         parameters: {
           batchSize: 2048,
@@ -117,5 +120,16 @@ describe("app state helpers", () => {
       sampling: { maxTokens: 512 },
       ui: { showInMenuBar: true, logPanelOpen: true, logPanelHeight: 240 },
     });
+  });
+
+  it("does not search for a replacement when automatic ports are disabled", async () => {
+    expect(appState.resolveLaunchPort).toBeTypeOf("function");
+    const findPort = vi.fn().mockResolvedValue(9091);
+
+    await expect(appState.resolveLaunchPort(false, 9090, findPort)).resolves.toBe(9090);
+    expect(findPort).not.toHaveBeenCalled();
+
+    await expect(appState.resolveLaunchPort(true, 9090, findPort)).resolves.toBe(9091);
+    expect(findPort).toHaveBeenCalledWith("127.0.0.1", 9090);
   });
 });

@@ -16,10 +16,12 @@ import {
   resolveLlamaServerPath,
   getTrayEnabled,
   setTrayEnabled,
+  buildCommandSpec,
 } from "./api/tauri";
 import { exportLegacyChatHistory } from "./api/legacyChatExport";
 import {
   buildCommandPreview,
+  buildCapabilityFilteredPreview,
   buildMaxCapabilitySampling,
   buildMaxCapabilityStartupParameters,
   getProfileById,
@@ -34,7 +36,11 @@ import {
 } from "./lib/parameterPresets";
 import { buildRuntimeConnection } from "./lib/externalClients";
 import { demoModelDirectories, demoModels } from "./state/appStore";
-import { buildSettingsSnapshot, reconcileMmprojPathForModel } from "./state/appState";
+import {
+  buildSettingsSnapshot,
+  reconcileMmprojPathForModel,
+  resolveLaunchPort,
+} from "./state/appState";
 import { useAppBootstrap } from "./hooks/useAppBootstrap";
 import { useDebouncedSettingsPersist } from "./hooks/useDebouncedSettingsPersist";
 import { useLlamaProcess } from "./hooks/useLlamaProcess";
@@ -76,6 +82,7 @@ export function App() {
     runningInTauri ? null : demoModels[0]?.path ?? null,
   );
   const [binaryPath, setBinaryPath] = useState<string | null>(null);
+  const [autoPort, setAutoPort] = useState(true);
   const [port, setPort] = useState(DEFAULT_PORT);
   const [profileId, setProfileId] = useState<ParameterProfile["id"]>("max-capability");
   const [parameterPresetSourceId, setParameterPresetSourceId] = useState<ParameterPresetSourceId>(
@@ -127,18 +134,48 @@ export function App() {
     onHealthy: () => setActiveTab("connect"),
   });
 
-  const commandPreview = useMemo(
-    () =>
-      buildCommandPreview({
+  const previewConfig = useMemo(
+    () => ({
         binaryPath,
         modelPath: selectedModel?.path ?? null,
-        host: "127.0.0.1",
+        host: "127.0.0.1" as const,
         port,
         parameters: startupParameters,
         prometheusHints,
       }),
     [binaryPath, port, prometheusHints, selectedModel?.path, startupParameters],
   );
+  const [commandPreview, setCommandPreview] = useState(() => ({
+    args: buildCommandPreview(previewConfig),
+    warnings: [] as string[],
+  }));
+
+  useEffect(() => {
+    if (!runningInTauri) {
+      setCommandPreview({ args: buildCommandPreview(previewConfig), warnings: [] });
+      return;
+    }
+    if (!previewConfig.binaryPath || !previewConfig.modelPath) {
+      setCommandPreview({ args: [], warnings: [] });
+      return;
+    }
+    let current = true;
+    setCommandPreview({ args: [], warnings: ["正在根据 llama-server 能力生成命令预览…"] });
+    void buildCapabilityFilteredPreview(previewConfig, buildCommandSpec)
+      .then((preview) => {
+        if (current) setCommandPreview(preview);
+      })
+      .catch((error) => {
+        if (!current) return;
+        setCommandPreview({
+          args: [],
+          warnings: [`命令预览探测失败：${error instanceof Error ? error.message : String(error)}`],
+        });
+      });
+    return () => {
+      current = false;
+    };
+  }, [previewConfig, runningInTauri]);
 
   const launchValidation = useMemo(
     () =>
@@ -161,6 +198,7 @@ export function App() {
         profileId,
         parameterPresetSourceId,
         selectedModelPath,
+        autoPort,
         port,
         startupParameters,
         sampling,
@@ -169,6 +207,7 @@ export function App() {
       }),
     [
       binaryPath,
+      autoPort,
       directories,
       port,
       parameterPresetSourceId,
@@ -199,6 +238,7 @@ export function App() {
     appendSystemLog,
     hasBootstrappedRef,
     setBinaryPath,
+    setAutoPort,
     setPort,
     setProfileId,
     setParameterPresetSourceId,
@@ -384,8 +424,8 @@ export function App() {
 
     let launchPort: number;
     try {
-      launchPort = await findAvailablePort("127.0.0.1", port);
-      if (launchPort !== port) {
+      launchPort = await resolveLaunchPort(autoPort, port, findAvailablePort);
+      if (autoPort && launchPort !== port) {
         setPort(launchPort);
         appendSystemLog(`端口 ${port} 已占用，自动改用 ${launchPort}。`);
       }
@@ -571,8 +611,12 @@ export function App() {
               sampling={sampling}
               ctxSize={startupParameters.ctxSize}
               onSamplingChange={setSampling}
+              advancedOpen={uiSettings.advancedOpen}
+              onAdvancedOpenChange={(advancedOpen) =>
+                setUiSettings((current) => ({ ...current, advancedOpen }))
+              }
             />
-            <CommandPreview args={commandPreview} />
+            <CommandPreview args={commandPreview.args} warnings={commandPreview.warnings} />
           </div>
         }
         connectionContent={
@@ -581,12 +625,22 @@ export function App() {
             runningInTauri={runningInTauri}
             trayEnabled={uiSettings.showInMenuBar}
             onTrayToggle={(enabled) => {
-              setUiSettings((current) => ({ ...current, showInMenuBar: enabled }));
-              if (runningInTauri) {
-                setTrayEnabled(enabled).catch((err) =>
-                  appendSystemLog(`状态栏图标设置失败：${err instanceof Error ? err.message : String(err)}`),
-                );
+              if (!runningInTauri) {
+                setUiSettings((current) => ({ ...current, showInMenuBar: enabled }));
+                return;
               }
+              void setTrayEnabled(enabled)
+                .then((actual) => {
+                  setUiSettings((current) => ({ ...current, showInMenuBar: actual }));
+                })
+                .catch((err) => {
+                  appendSystemLog(
+                    `状态栏图标设置失败：${err instanceof Error ? err.message : String(err)}`,
+                  );
+                  void getTrayEnabled().then((actual) => {
+                    setUiSettings((current) => ({ ...current, showInMenuBar: actual }));
+                  });
+                });
             }}
             onOpenTest={() => setActiveTab("test")}
             onExportLegacyHistory={() => void handleExportLegacyHistory()}
@@ -609,6 +663,14 @@ export function App() {
         canStop={canStop}
         onStop={handleStop}
         onClearLogs={clearLogs}
+        logOpen={uiSettings.logPanelOpen}
+        logHeight={uiSettings.logPanelHeight}
+        onLogOpenChange={(logPanelOpen) =>
+          setUiSettings((current) => ({ ...current, logPanelOpen }))
+        }
+        onLogHeightChange={(logPanelHeight) =>
+          setUiSettings((current) => ({ ...current, logPanelHeight }))
+        }
       />
     </div>
   );

@@ -43,8 +43,10 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
   const nextStartupDelayRef = useRef(HEALTH_STARTUP_INITIAL_DELAY_MS);
   const healthyNotifiedRef = useRef(false);
   const lastErrorRef = useRef<string | null>(null);
+  const generationRef = useRef(0);
 
   const stopHealthPoll = useCallback(() => {
+    generationRef.current += 1;
     if (pollTimerRef.current !== null) {
       clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
@@ -71,9 +73,10 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
     [appendSystemLog, mergeLogs, onHealthy],
   );
 
-  const pollRuntime = useCallback(async () => {
+  const pollRuntime = useCallback(async (generation: number) => {
     try {
       const next = await fetchRuntimeSnapshot();
+      if (generation !== generationRef.current) return;
       applySnapshot(next);
       if (next.pid === null) {
         pollTimerRef.current = null;
@@ -89,24 +92,31 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
           Math.round(nextStartupDelayRef.current * 1.4),
         );
       }
-      pollTimerRef.current = setTimeout(() => void pollRuntime(), delay);
+      pollTimerRef.current = setTimeout(() => void pollRuntime(generation), delay);
     } catch (error) {
+      if (generation !== generationRef.current) return;
       appendSystemLog(
         `读取运行状态失败，将自动重试：${error instanceof Error ? error.message : String(error)}`,
       );
-      pollTimerRef.current = setTimeout(() => void pollRuntime(), HEALTH_POLL_INTERVAL_MS);
+      pollTimerRef.current = setTimeout(
+        () => void pollRuntime(generation),
+        HEALTH_POLL_INTERVAL_MS,
+      );
     }
   }, [appendSystemLog, applySnapshot]);
 
-  const startHealthPoll = useCallback(() => {
-    stopHealthPoll();
+  const startHealthPoll = useCallback((generation: number) => {
     nextStartupDelayRef.current = HEALTH_STARTUP_INITIAL_DELAY_MS;
-    pollTimerRef.current = setTimeout(() => void pollRuntime(), HEALTH_STARTUP_INITIAL_DELAY_MS);
-  }, [pollRuntime, stopHealthPoll]);
+    pollTimerRef.current = setTimeout(
+      () => void pollRuntime(generation),
+      HEALTH_STARTUP_INITIAL_DELAY_MS,
+    );
+  }, [pollRuntime]);
 
   const handleStart = useCallback(
     async (config: LaunchConfig) => {
       stopHealthPoll();
+      const generation = generationRef.current;
       healthyNotifiedRef.current = false;
       lastErrorRef.current = null;
       if (!isTauriRuntime()) {
@@ -141,10 +151,12 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
       appendSystemLog("正在启动 llama-server...");
       try {
         const next = await startLlama(config);
+        if (generation !== generationRef.current) return;
         applySnapshot(next);
         appendSystemLog(`进程已启动${next.pid ? `，PID ${next.pid}` : ""}。`);
-        if (next.pid !== null) startHealthPoll();
+        if (next.pid !== null) startHealthPoll(generation);
       } catch (error) {
+        if (generation !== generationRef.current) return;
         const message = error instanceof Error ? error.message : String(error);
         setSnapshot((current) => ({ ...current, status: "failed", lastError: message }));
         appendSystemLog(message);
@@ -155,6 +167,7 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
 
   const handleStop = useCallback(async () => {
     stopHealthPoll();
+    const generation = generationRef.current;
     if (!isTauriRuntime()) {
       setSnapshot({ ...idleSnapshot, status: "stopped" });
       appendSystemLog("浏览器预览模式已停止。");
@@ -163,9 +176,11 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
     setSnapshot((current) => ({ ...current, status: "stopping" }));
     try {
       const next = await stopLlama();
+      if (generation !== generationRef.current) return;
       applySnapshot(next);
       appendSystemLog("llama-server 已停止。");
     } catch (error) {
+      if (generation !== generationRef.current) return;
       const message = error instanceof Error ? error.message : String(error);
       setSnapshot((current) => ({ ...current, status: "failed", lastError: message }));
       appendSystemLog(message);

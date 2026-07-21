@@ -8,7 +8,10 @@ use illama_lib::{
     },
 };
 #[cfg(unix)]
-use std::{fs, time::Duration};
+use std::{
+    fs,
+    time::{Duration, Instant},
+};
 
 #[cfg(unix)]
 #[test]
@@ -57,6 +60,44 @@ fn marks_a_hanging_binary_invalid_after_the_probe_timeout() {
         .warnings
         .iter()
         .any(|warning| warning.contains("超时")));
+}
+
+#[cfg(unix)]
+#[test]
+fn probe_timeout_kills_background_processes_holding_output_pipes() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("children.pid");
+    fs::write(&pid_file, "").unwrap();
+    let binary = write_shell_script(
+        dir.path().join("process-tree-server"),
+        &format!(
+            "trap '' HUP\necho $$ >> '{}'\nsleep 5 &\necho $! >> '{}'\nwait",
+            pid_file.to_string_lossy(),
+            pid_file.to_string_lossy(),
+        ),
+    );
+    let started = Instant::now();
+
+    let capabilities =
+        probe_llama_server_with_timeout(binary.to_string_lossy().as_ref(), Duration::from_secs(1));
+
+    assert_eq!(capabilities.status, ProbeStatus::Invalid);
+    assert!(
+        capabilities
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("超时")),
+        "{:?}",
+        capabilities.warnings
+    );
+    assert!(started.elapsed() < Duration::from_secs(4));
+    let pids = fs::read_to_string(pid_file).unwrap();
+    assert!(!pids.is_empty());
+    for pid in pids.lines() {
+        let pid = pid.parse::<i32>().unwrap();
+        let alive = unsafe { libc::kill(pid, 0) == 0 };
+        assert!(!alive, "background process {pid} survived probe timeout");
+    }
 }
 
 #[cfg(unix)]

@@ -6,6 +6,23 @@ import type {
   StartupParameters,
   ValidationResult,
 } from "../types/domain";
+import type { CommandSpec } from "../api/tauri";
+
+export interface CapabilityFilteredPreview {
+  args: string[];
+  warnings: string[];
+}
+
+export async function buildCapabilityFilteredPreview(
+  config: LaunchConfig,
+  buildSpec: (config: LaunchConfig) => Promise<CommandSpec>,
+): Promise<CapabilityFilteredPreview> {
+  const spec = await buildSpec(config);
+  return {
+    args: [spec.executable, ...spec.args],
+    warnings: spec.warnings,
+  };
+}
 
 export const defaultSampling: SamplingParameters = {
   temperature: 0.7,

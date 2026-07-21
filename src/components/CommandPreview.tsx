@@ -3,6 +3,7 @@ import { useState } from "react";
 
 interface CommandPreviewProps {
   args: string[];
+  warnings?: string[];
 }
 
 export type CommandShell = "posix" | "powershell";
@@ -27,7 +28,7 @@ export function formatCommandForShell(args: string[], shell: CommandShell) {
   return args.map(quotePosix).join(" \\\n  ");
 }
 
-export function CommandPreview({ args }: CommandPreviewProps) {
+export function CommandPreview({ args, warnings = [] }: CommandPreviewProps) {
   const [copied, setCopied] = useState(false);
   const shell: CommandShell = navigator.userAgent.includes("Windows")
     ? "powershell"
@@ -62,6 +63,13 @@ export function CommandPreview({ args }: CommandPreviewProps) {
         </button>
       </div>
       <pre>{command}</pre>
+      {warnings.length > 0 && (
+        <ul className="validation-list warning-list" aria-label="命令预览警告">
+          {warnings.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

@@ -100,17 +100,9 @@ pub fn patch_settings_command(
     patch: serde_json::Value,
 ) -> Result<SettingsEnvelope, String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let envelope = store
+    store
         .patch(&settings_path(app_data_dir), patch)
-        .map_err(|error| error.to_string())?;
-    if envelope.settings.ui.show_in_menu_bar {
-        if !tray::is_tray_active(&app) {
-            tray::create_tray(&app).map_err(|error| error.to_string())?;
-        }
-    } else {
-        tray::destroy_tray(&app);
-    }
-    Ok(envelope)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -172,25 +164,24 @@ pub fn set_tray_enabled_command(
     app: AppHandle,
     store: State<'_, SettingsStore>,
     enabled: bool,
-) -> Result<(), String> {
-    if enabled {
-        if !tray::is_tray_active(&app) {
-            tray::create_tray(&app).map_err(|e| e.to_string())?;
-        }
-    } else {
-        tray::destroy_tray(&app);
-    }
-
-    // Persist the preference
+) -> Result<bool, String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let path = settings_path(app_data_dir);
     store
-        .patch(
-            &path,
-            serde_json::json!({ "ui": { "showInMenuBar": enabled } }),
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .set_tray_enabled(&path, enabled, |next| {
+            if next {
+                if !tray::is_tray_active(&app) {
+                    tray::create_tray(&app)
+                        .map(|_| ())
+                        .map_err(|error| std::io::Error::other(error.to_string()))?;
+                }
+            } else {
+                tray::destroy_tray(&app);
+            }
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(tray::is_tray_active(&app))
 }
 
 #[tauri::command]

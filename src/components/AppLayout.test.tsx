@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppLayout } from "./AppLayout";
 import type { LogEntry, RuntimeMetrics } from "../types/domain";
+import { useState } from "react";
 
 const logs: LogEntry[] = [
   {
@@ -25,24 +26,68 @@ const runtimeMetrics: RuntimeMetrics = {
 function renderLayout(options?: { runtimeStatus?: "idle" | "failed"; canStop?: boolean }) {
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 
-  return render(
-    <AppLayout
-      activeTab="run"
-      onTabChange={vi.fn()}
-      sidebar={<div>模型列表</div>}
-      runContent={<div>运行内容</div>}
-      connectionContent={<div>连接内容</div>}
-      testContent={<div>测试内容</div>}
-      logs={logs}
-      runtimeStatus={options?.runtimeStatus ?? "idle"}
-      canStop={options?.canStop ?? false}
-      runtimeMetrics={runtimeMetrics}
-      onStop={vi.fn()}
-    />,
-  );
+  function Host() {
+    const [logOpen, setLogOpen] = useState(false);
+    const [logHeight, setLogHeight] = useState(180);
+    return (
+      <AppLayout
+        activeTab="run"
+        onTabChange={vi.fn()}
+        sidebar={<div>模型列表</div>}
+        runContent={<div>运行内容</div>}
+        connectionContent={<div>连接内容</div>}
+        testContent={<div>测试内容</div>}
+        logs={logs}
+        runtimeStatus={options?.runtimeStatus ?? "idle"}
+        canStop={options?.canStop ?? false}
+        runtimeMetrics={runtimeMetrics}
+        onStop={vi.fn()}
+        logOpen={logOpen}
+        logHeight={logHeight}
+        onLogOpenChange={setLogOpen}
+        onLogHeightChange={setLogHeight}
+      />
+    );
+  }
+  return render(<Host />);
 }
 
 describe("AppLayout", () => {
+  it("restores controlled log visibility and height and reports toggles", () => {
+    const onLogOpenChange = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    render(
+      <AppLayout
+        {...({
+          activeTab: "run",
+          onTabChange: vi.fn(),
+          sidebar: <div />,
+          runContent: <div />,
+          connectionContent: <div />,
+          testContent: <div />,
+          logs,
+          runtimeStatus: "idle",
+          runtimeMetrics,
+          canStop: false,
+          onStop: vi.fn(),
+          logOpen: true,
+          logHeight: 300,
+          onLogOpenChange,
+          onLogHeightChange: vi.fn(),
+        } as React.ComponentProps<typeof AppLayout> & {
+          logOpen: boolean;
+          logHeight: number;
+          onLogOpenChange: (open: boolean) => void;
+          onLogHeightChange: (height: number) => void;
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "日志面板" })).toHaveStyle({ height: "300px" });
+    fireEvent.click(screen.getByRole("button", { name: /日志 1/ }));
+    expect(onLogOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("lets users resize the log drawer by dragging its top edge", () => {
     renderLayout();
 

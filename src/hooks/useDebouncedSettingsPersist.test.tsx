@@ -53,6 +53,13 @@ describe("useDebouncedSettingsPersist", () => {
     );
     await vi.advanceTimersByTimeAsync(1500);
 
-    expect(patchSettings).toHaveBeenCalledWith(settings);
+    expect(patchSettings).toHaveBeenCalledWith({
+      ...settings,
+      ui: {
+        logPanelOpen: false,
+        logPanelHeight: 180,
+        advancedOpen: false,
+      },
+    });
   });
 });

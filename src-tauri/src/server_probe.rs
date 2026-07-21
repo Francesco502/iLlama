@@ -2,12 +2,15 @@ use crate::parameters::{build_command_args, LaunchConfig};
 use serde::{Deserialize, Serialize};
 use std::{
     io::Read,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
 
 const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const PROBE_READER_DRAIN_TIMEOUT: Duration = Duration::from_millis(200);
+const MAX_PROBE_OUTPUT_BYTES: u64 = 1024 * 1024;
 const REQUIRED_FLAGS: [&str; 3] = ["--model", "--host", "--port"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -145,17 +148,18 @@ struct ProbeOutput {
 }
 
 fn run_probe(binary_path: &str, args: &[&str], timeout: Duration) -> Result<ProbeOutput, String> {
-    let mut child = Command::new(binary_path)
+    let mut command = Command::new(binary_path);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_probe_process(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|error| format!("无法执行 llama-server：{error}"))?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdout_reader = thread::spawn(move || read_stream(stdout));
-    let stderr_reader = thread::spawn(move || read_stream(stderr));
+    let stdout_reader = spawn_reader(child.stdout.take());
+    let stderr_reader = spawn_reader(child.stderr.take());
     let started = Instant::now();
 
     let exit_status = loop {
@@ -163,17 +167,21 @@ fn run_probe(binary_path: &str, args: &[&str], timeout: Duration) -> Result<Prob
             Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() < timeout => thread::sleep(Duration::from_millis(10)),
             Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
+                terminate_probe_tree(&mut child);
+                drain_reader(stdout_reader);
+                drain_reader(stderr_reader);
                 return Err("llama-server 能力探测超时。".to_string());
             }
-            Err(error) => return Err(format!("等待 llama-server 探测失败：{error}")),
+            Err(error) => {
+                terminate_probe_tree(&mut child);
+                drain_reader(stdout_reader);
+                drain_reader(stderr_reader);
+                return Err(format!("等待 llama-server 探测失败：{error}"));
+            }
         }
     };
-    let stdout = stdout_reader.join().unwrap_or_default();
-    let stderr = stderr_reader.join().unwrap_or_default();
+    let stdout = drain_reader(stdout_reader);
+    let stderr = drain_reader(stderr_reader);
     Ok(ProbeOutput {
         success: exit_status.success(),
         code: exit_status.code(),
@@ -181,13 +189,76 @@ fn run_probe(binary_path: &str, args: &[&str], timeout: Duration) -> Result<Prob
     })
 }
 
+fn spawn_reader(stream: Option<impl Read + Send + 'static>) -> mpsc::Receiver<String> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(read_stream(stream));
+    });
+    receiver
+}
+
+fn drain_reader(reader: mpsc::Receiver<String>) -> String {
+    reader
+        .recv_timeout(PROBE_READER_DRAIN_TIMEOUT)
+        .unwrap_or_default()
+}
+
 fn read_stream(stream: Option<impl Read>) -> String {
-    let Some(mut stream) = stream else {
+    let Some(stream) = stream else {
         return String::new();
     };
     let mut output = String::new();
-    let _ = stream.read_to_string(&mut output);
+    let _ = stream
+        .take(MAX_PROBE_OUTPUT_BYTES)
+        .read_to_string(&mut output);
     output
+}
+
+#[cfg(unix)]
+fn configure_probe_process(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+}
+
+#[cfg(windows)]
+fn configure_probe_process(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+}
+
+#[cfg(not(any(unix, windows)))]
+fn configure_probe_process(_command: &mut Command) {}
+
+fn terminate_probe_tree(child: &mut Child) {
+    #[cfg(unix)]
+    unsafe {
+        let _ = libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+
+    #[cfg(windows)]
+    {
+        // The child is created in its own process group; taskkill /T terminates descendants too.
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn first_non_empty_line(output: &str) -> Option<String> {

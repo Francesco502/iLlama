@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildMaxCapabilitySampling,
   buildMaxCapabilityStartupParameters,
@@ -8,6 +8,7 @@ import {
   getProfileById,
   validateLaunchConfig,
 } from "./parameterSchema";
+import * as parameterSchema from "./parameterSchema";
 import type { LaunchConfig } from "../types/domain";
 import { emptyPrometheusHintsConfig } from "../types/domain";
 
@@ -35,6 +36,43 @@ const baseConfig: LaunchConfig = {
 };
 
 describe("parameter schema", () => {
+  it("builds command previews from the backend capability-filtered command spec", async () => {
+    expect(parameterSchema.buildCapabilityFilteredPreview).toBeTypeOf("function");
+    const config = {
+      binaryPath: "/Applications/llama server",
+      modelPath: "/Models/Test.gguf",
+      host: "127.0.0.1" as const,
+      port: 8080,
+      parameters: getProfileById("custom").parameters,
+      prometheusHints: emptyPrometheusHintsConfig(),
+    };
+    const buildSpec = vi.fn().mockResolvedValue({
+      executable: "/Applications/llama server",
+      args: ["--model", "/Models/Test.gguf", "--port", "8080"],
+      warnings: ["当前 llama-server 不支持 --metrics，已从启动命令省略。"],
+      capabilities: {
+        binaryPath: "/Applications/llama server",
+        versionText: "llama-server 1",
+        supportedFlags: ["--model", "--host", "--port"],
+        status: "limited" as const,
+        warnings: [],
+      },
+    });
+
+    const preview = await parameterSchema.buildCapabilityFilteredPreview(config, buildSpec);
+
+    expect(buildSpec).toHaveBeenCalledWith(config);
+    expect(preview).toEqual({
+      args: [
+        "/Applications/llama server",
+        "--model",
+        "/Models/Test.gguf",
+        "--port",
+        "8080",
+      ],
+      warnings: ["当前 llama-server 不支持 --metrics，已从启动命令省略。"],
+    });
+  });
   it("builds a stable balanced llama-server command preview", () => {
     const preview = buildCommandPreview(baseConfig);
 

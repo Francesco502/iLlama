@@ -1,7 +1,20 @@
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { formatCommandForShell } from "./CommandPreview";
+import { CommandPreview, formatCommandForShell } from "./CommandPreview";
 
 describe("formatCommandForShell", () => {
+  it("shows capability warnings next to the exact preview", () => {
+    render(
+      <CommandPreview
+        {...({
+          args: ["/bin/llama-server", "--model", "/models/a.gguf"],
+          warnings: ["当前 llama-server 不支持 --metrics，已省略。"],
+        } as React.ComponentProps<typeof CommandPreview> & { warnings: string[] })}
+      />,
+    );
+
+    expect(screen.getByText("当前 llama-server 不支持 --metrics，已省略。")).toBeInTheDocument();
+  });
   it("quotes paths with spaces for POSIX shells", () => {
     expect(
       formatCommandForShell(

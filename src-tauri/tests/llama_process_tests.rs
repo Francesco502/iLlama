@@ -12,7 +12,7 @@ use std::{
     net::TcpListener,
     sync::{Mutex, MutexGuard, OnceLock},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(unix)]
@@ -53,14 +53,14 @@ fn process_that_exits_before_health_confirmation_is_reported_as_failed() {
             18080,
         ))
         .unwrap();
-    let mut snapshot = state.snapshot();
-    for _ in 0..20 {
-        if snapshot.status != RuntimeStatus::Starting {
-            break;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let snapshot = loop {
+        let snapshot = state.snapshot();
+        if snapshot.status != RuntimeStatus::Starting || Instant::now() >= deadline {
+            break snapshot;
         }
-        thread::sleep(Duration::from_millis(50));
-        snapshot = state.snapshot();
-    }
+        thread::sleep(Duration::from_millis(20));
+    };
 
     assert_eq!(snapshot.status, RuntimeStatus::Failed);
     assert_eq!(
@@ -199,7 +199,9 @@ fn write_shell_script(path: std::path::PathBuf, body: &str) -> std::path::PathBu
 #[cfg(unix)]
 fn process_test_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(unix)]

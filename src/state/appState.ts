@@ -15,6 +15,7 @@ interface SettingsSnapshotInput {
   profileId: ParameterProfile["id"];
   parameterPresetSourceId: ParameterPresetSourceId;
   selectedModelPath: string | null;
+  autoPort: boolean;
   port: number;
   startupParameters: StartupParameters;
   sampling: SamplingParameters;
@@ -64,6 +65,7 @@ export function buildSettingsSnapshot({
   profileId,
   parameterPresetSourceId,
   selectedModelPath,
+  autoPort,
   port,
   startupParameters,
   sampling,
@@ -80,7 +82,7 @@ export function buildSettingsSnapshot({
       profileId: profileId === "max-capability" ? "auto" : "custom",
       parameterPresetSourceId,
       selectedModelPath,
-      autoPort: true,
+      autoPort,
       port,
       parameters: startupParameters,
       prometheusHints,
@@ -88,6 +90,14 @@ export function buildSettingsSnapshot({
     sampling,
     ui,
   };
+}
+
+export async function resolveLaunchPort(
+  autoPort: boolean,
+  preferredPort: number,
+  findPort: (host: string, preferred: number) => Promise<number>,
+): Promise<number> {
+  return autoPort ? findPort("127.0.0.1", preferredPort) : preferredPort;
 }
 
 function isPathInsideDirectory(path: string, directoryPath: string): boolean {

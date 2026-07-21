@@ -1,5 +1,4 @@
 import { ChevronDown, SlidersHorizontal, HelpCircle } from "lucide-react";
-import { useState } from "react";
 import { getAdaptiveSafetyFactor } from "../lib/contextBudget";
 import { calculateMaxOutputTokens } from "../lib/parameterSchema";
 import type { ParameterProfile, SamplingParameters } from "../types/domain";
@@ -9,6 +8,8 @@ interface SamplingPanelProps {
   sampling: SamplingParameters;
   ctxSize: number;
   onSamplingChange: (sampling: SamplingParameters) => void;
+  advancedOpen: boolean;
+  onAdvancedOpenChange: (open: boolean) => void;
 }
 
 function FieldLabel({ label, tooltip }: { label: string; tooltip?: string }) {
@@ -25,8 +26,14 @@ function FieldLabel({ label, tooltip }: { label: string; tooltip?: string }) {
   );
 }
 
-export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChange }: SamplingPanelProps) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+export function SamplingPanel({
+  parameterMode,
+  sampling,
+  ctxSize,
+  onSamplingChange,
+  advancedOpen,
+  onAdvancedOpenChange,
+}: SamplingPanelProps) {
   function update<K extends keyof SamplingParameters>(key: K, value: SamplingParameters[K]) {
     onSamplingChange({ ...sampling, [key]: value });
   }
@@ -90,7 +97,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
         className="sampling-advanced-toggle"
         aria-expanded={advancedOpen}
         aria-controls="sampling-advanced"
-        onClick={() => setAdvancedOpen((value) => !value)}
+        onClick={() => onAdvancedOpenChange(!advancedOpen)}
       >
         <ChevronDown size={14} data-rotated={advancedOpen} />
         高级采样参数

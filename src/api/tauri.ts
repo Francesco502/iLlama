@@ -103,7 +103,11 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   await invoke("save_settings_command", { settings });
 }
 
-export async function patchSettings(patch: Partial<AppSettings>): Promise<SettingsEnvelope> {
+export type AppSettingsPatch = Omit<Partial<AppSettings>, "ui"> & {
+  ui?: Partial<AppSettings["ui"]>;
+};
+
+export async function patchSettings(patch: AppSettingsPatch): Promise<SettingsEnvelope> {
   return invoke<SettingsEnvelope>("patch_settings_command", { patch });
 }
 
@@ -151,8 +155,8 @@ export async function findAvailablePort(host: string, preferred: number): Promis
   return invoke<number>("find_available_port_command", { host, preferred });
 }
 
-export async function setTrayEnabled(enabled: boolean): Promise<void> {
-  await invoke("set_tray_enabled_command", { enabled });
+export async function setTrayEnabled(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("set_tray_enabled_command", { enabled });
 }
 
 export async function getTrayEnabled(): Promise<boolean> {
