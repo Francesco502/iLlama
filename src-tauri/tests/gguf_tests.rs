@@ -135,7 +135,7 @@ fn rejects_truncated_tensor_data() {
 
 #[test]
 fn rejects_truncated_data_for_current_gguf_v3_tensor_types() {
-    for (tensor_type, block_size) in [(34_u32, 256_u64), (35, 256), (39, 32)] {
+    for (tensor_type, block_size) in [(34_u32, 256_u64), (35, 256), (39, 32), (40, 64), (41, 128)] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir
             .path()
@@ -157,9 +157,13 @@ fn rejects_truncated_data_for_current_gguf_v3_tensor_types() {
 
 #[test]
 fn accepts_complete_data_for_current_gguf_v3_tensor_types() {
-    for (tensor_type, block_size, type_size) in
-        [(34_u32, 256_u64, 54_usize), (35, 256, 66), (39, 32, 17)]
-    {
+    for (tensor_type, block_size, type_size) in [
+        (34_u32, 256_u64, 54_usize),
+        (35, 256, 66),
+        (39, 32, 17),
+        (40, 64, 36),
+        (41, 128, 18),
+    ] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(format!("complete-type-{tensor_type}.gguf"));
         let mut bytes = header(3, 1, 0);
