@@ -94,6 +94,9 @@ if (!ciWorkflow.includes("npm audit --audit-level=high")) {
 if (!ciWorkflow.includes("rustsec/audit-check@")) {
   fail("CI does not run the RustSec audit action");
 }
+if (!ciWorkflow.includes("npm run test:ui")) {
+  fail("CI does not run the Playwright UI suite");
+}
 
 if (failures.length > 0) {
   console.error("Project policy verification failed:\n");
