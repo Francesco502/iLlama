@@ -1,6 +1,6 @@
 :root {
   color: #1d1d1f;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -21,6 +21,7 @@
   --muted: #86868b;
   --muted-strong: #6e6e73;
   --accent: #0A84FF;
+  --accent-solid: #0066cc;
   --accent-hover: #0066CC;
   --accent-soft: rgba(10, 132, 255, 0.1);
   --accent-soft-hover: rgba(10, 132, 255, 0.16);
@@ -242,7 +243,7 @@ button { cursor: default; }
   padding: 0 14px;
   border: none;
   color: #fff;
-  background: var(--accent);
+  background: var(--accent-solid);
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 122, 255, 0.3);
 }
@@ -590,6 +591,46 @@ button { cursor: default; }
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 8%, transparent);
   font-size: 12px;
+}
+.runtime-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+}
+.settings-warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+}
+.settings-warning-banner p {
+  margin: 4px 0 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+.settings-warning-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+.runtime-error-banner strong,
+.runtime-error-message {
+  color: var(--danger);
+}
+.runtime-error-banner p,
+.runtime-error-message {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.runtime-error-message {
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
 }
 .runtime-status-actions .health-chip[data-status="starting"],
 .runtime-status-actions .health-chip[data-status="stopping"] {
@@ -1331,7 +1372,7 @@ button { cursor: default; }
   color: var(--text);
 }
 .preset-badge[data-active="true"] {
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #ffffff;
   border-color: var(--accent);
 }
@@ -2031,7 +2072,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   padding: 10px 14px;
   border-radius: 14px;
   color: #fff;
-  background: var(--accent);
+  background: var(--accent-solid);
 }
 .chat-message-topline {
   display: flex;
@@ -2182,6 +2223,33 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   font-size: 12.5px;
   color: var(--text);
   background: var(--surface-raised);
+}
+
+.parameter-advanced-details {
+  margin-top: 12px;
+  border: 0.5px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+.parameter-advanced-details > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: var(--muted-strong);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.parameter-advanced-details[open] > summary {
+  border-bottom: 0.5px solid var(--border-subtle);
+}
+.parameter-advanced-grid,
+.parameter-advanced-details > .multimodal-config,
+.parameter-advanced-details > .toggle-list,
+.parameter-advanced-details > .prometheus-hints-details {
+  margin-right: 12px;
+  margin-left: 12px;
+}
+.parameter-advanced-grid {
+  padding-top: 12px;
 }
 
 .prometheus-hints-details {

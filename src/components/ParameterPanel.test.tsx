@@ -87,7 +87,8 @@ describe("ParameterPanel", () => {
     });
   });
 
-  it("exposes toggles and tooltip help to keyboard and assistive technology", () => {
+  it("keeps the primary launch fields visible and advanced controls collapsed", async () => {
+    const user = userEvent.setup();
     const profile = getProfileById("custom");
     render(
       <ParameterPanel
@@ -106,6 +107,11 @@ describe("ParameterPanel", () => {
       />,
     );
 
+    expect(screen.getByLabelText("GPU 层数")).toBeVisible();
+    expect(screen.getByLabelText("端口号")).toBeVisible();
+    expect(screen.getByText("高级启动参数").closest("details")).not.toHaveAttribute("open");
+
+    await user.click(screen.getByText("高级启动参数"));
     expect(screen.getByRole("switch", { name: /内存映射 mmap/ })).toHaveAttribute(
       "aria-checked",
       String(profile.parameters.mmap),

@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { buildCommandSpec, probeLlamaServer, type ServerCapabilities } from "../api/tauri";
+import {
+  buildCommandSpec,
+  normalizeCommandError,
+  probeLlamaServer,
+  type ServerCapabilities,
+} from "../api/tauri";
 import { buildCommandPreview } from "../lib/parameterSchema";
 import type { LaunchConfig } from "../types/domain";
 
@@ -60,7 +65,7 @@ export function useCommandPreview(
             setPreview({
               args: [],
               warnings: [
-                `命令预览探测失败：${error instanceof Error ? error.message : String(error)}`,
+                `命令预览探测失败：${normalizeCommandError(error).message}`,
               ],
             });
           }

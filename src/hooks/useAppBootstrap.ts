@@ -2,6 +2,7 @@ import { useEffect, type Dispatch, type SetStateAction } from "react";
 import type { MutableRefObject } from "react";
 import { loadSettings, resolveLlamaServerPath } from "../api/tauri";
 import type { AppSettings } from "../api/tauri";
+import type { SettingsWarning } from "../api/tauri";
 import { getProfileById } from "../lib/parameterSchema";
 import {
   MODEL_FAMILY_AUTO_PRESET_SOURCE_ID,
@@ -23,6 +24,7 @@ const DEFAULT_PORT = 8080;
 export interface AppBootstrapOptions {
   runningInTauri: boolean;
   appendSystemLog: (message: string) => void;
+  onWarning?: (warning: SettingsWarning) => void;
   hasBootstrappedRef: MutableRefObject<boolean>;
   setBinaryPath: (path: string | null) => void;
   setAutoPort: (enabled: boolean) => void;
@@ -42,6 +44,7 @@ export interface AppBootstrapOptions {
 export function useAppBootstrap({
   runningInTauri,
   appendSystemLog,
+  onWarning,
   hasBootstrappedRef,
   setBinaryPath,
   setAutoPort,
@@ -64,7 +67,10 @@ export function useAppBootstrap({
       try {
         const envelope = await loadSettings();
         if (cancelled) return;
-        envelope.warnings.forEach((warning) => appendSystemLog(warning.message));
+        envelope.warnings.forEach((warning) => {
+          appendSystemLog(warning.message);
+          onWarning?.(warning);
+        });
         const settings = envelope.settings;
         const resolvedBinary = await resolveLlamaServerPath(settings.llamaServerPath);
         if (cancelled) return;
@@ -105,6 +111,7 @@ export function useAppBootstrap({
     };
   }, [
     appendSystemLog,
+    onWarning,
     hasBootstrappedRef,
     runningInTauri,
     scanDirectories,

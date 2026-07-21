@@ -50,6 +50,28 @@ const snapshot: RuntimeSnapshot = {
 };
 
 describe("RuntimeStatusCard", () => {
+  it("keeps an abnormal-exit error visible with a direct log recovery action", async () => {
+    const onOpenLogs = vi.fn();
+    render(
+      <RuntimeStatusCard
+        snapshot={{
+          ...snapshot,
+          status: "failed",
+          pid: null,
+          activeLaunch: null,
+          activeModelPath: null,
+          lastError: "llama-server exited with 9",
+        }}
+        onStop={vi.fn()}
+        onOpenLogs={onOpenLogs}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("llama-server exited with 9");
+    fireEvent.click(screen.getByRole("button", { name: "查看日志" }));
+    expect(onOpenLogs).toHaveBeenCalledOnce();
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-21T08:01:05.000Z"));

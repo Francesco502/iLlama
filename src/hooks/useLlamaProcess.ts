@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isTauriRuntime,
+  normalizeCommandError,
   runtimeSnapshot as fetchRuntimeSnapshot,
   startLlama,
   stopLlama,
@@ -178,9 +179,9 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
           startedAt,
           activeModelPath: config.modelPath,
           activeLaunch:
-            config.binaryPath && config.modelPath
+            config.modelPath
               ? {
-                  binaryPath: config.binaryPath,
+                  binaryPath: config.binaryPath || "browser-preview",
                   modelPath: config.modelPath,
                   host: config.host,
                   port: config.port,
@@ -209,7 +210,7 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
         if (next.pid !== null) startHealthPoll(generation);
       } catch (error) {
         if (generation !== generationRef.current) return;
-        const message = error instanceof Error ? error.message : String(error);
+        const message = normalizeCommandError(error).message;
         setSnapshot((current) => ({ ...current, status: "failed", lastError: message }));
         appendSystemLog(message);
       } finally {
@@ -236,7 +237,7 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
       appendSystemLog("llama-server 已停止。");
     } catch (error) {
       if (generation !== generationRef.current) return;
-      const message = error instanceof Error ? error.message : String(error);
+      const message = normalizeCommandError(error).message;
       setSnapshot((current) => ({ ...current, status: "failed", lastError: message }));
       appendSystemLog(message);
     }

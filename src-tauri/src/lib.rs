@@ -50,8 +50,18 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+                #[cfg(target_os = "windows")]
+                if tray::is_tray_active(window.app_handle()) {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+                let _ = (window, api);
             }
         })
         .build(tauri::generate_context!())

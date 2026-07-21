@@ -40,6 +40,31 @@ export interface SettingsWarning {
   recoveryAction: string;
 }
 
+export interface CommandError {
+  code: string;
+  message: string;
+  recoveryAction: string;
+}
+
+export function normalizeCommandError(error: unknown): CommandError {
+  if (error && typeof error === "object") {
+    const value = error as Partial<CommandError>;
+    if (typeof value.message === "string") {
+      return {
+        code: typeof value.code === "string" ? value.code : "command_failed",
+        message: value.message,
+        recoveryAction:
+          typeof value.recoveryAction === "string" ? value.recoveryAction : "viewLogs",
+      };
+    }
+  }
+  return {
+    code: "command_failed",
+    message: error instanceof Error ? error.message : String(error),
+    recoveryAction: "viewLogs",
+  };
+}
+
 export interface SettingsEnvelope {
   settings: AppSettings;
   warnings: SettingsWarning[];

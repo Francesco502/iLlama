@@ -13,10 +13,39 @@ use crate::{
     },
     tray,
 };
+use serde::Serialize;
 use std::{env, path::PathBuf};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const MODEL_SCAN_PROGRESS_EVENT: &str = "model-scan-progress";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandError {
+    pub code: String,
+    pub message: String,
+    pub recovery_action: String,
+}
+
+fn command_error(code: &str, recovery_action: &str, message: impl Into<String>) -> CommandError {
+    CommandError {
+        code: code.to_string(),
+        message: message.into(),
+        recovery_action: recovery_action.to_string(),
+    }
+}
+
+fn launch_error(message: String) -> CommandError {
+    if message.contains("端口") {
+        command_error("port_unavailable", "changePort", message)
+    } else if message.contains("llama-server") {
+        command_error("server_unavailable", "selectBinary", message)
+    } else if message.contains("模型") {
+        command_error("model_unavailable", "selectModel", message)
+    } else {
+        command_error("launch_failed", "viewLogs", message)
+    }
+}
 
 #[tauri::command]
 pub fn validate_launch_config_command(config: LaunchConfig) -> ValidationResult {
@@ -37,15 +66,18 @@ pub fn probe_llama_server_command(path: String) -> ServerCapabilities {
 pub fn build_command_spec_command(
     config: LaunchConfig,
     capabilities: Option<ServerCapabilities>,
-) -> Result<CommandSpec, String> {
-    let binary_path = config
-        .binary_path
-        .as_deref()
-        .ok_or_else(|| "未找到 llama-server，请选择可执行文件。".to_string())?;
+) -> Result<CommandSpec, CommandError> {
+    let binary_path = config.binary_path.as_deref().ok_or_else(|| {
+        command_error(
+            "server_required",
+            "selectBinary",
+            "未找到 llama-server，请选择可执行文件。",
+        )
+    })?;
     let capabilities = capabilities
         .filter(|capabilities| capabilities.binary_path == binary_path)
         .unwrap_or_else(|| probe_llama_server(binary_path));
-    build_command_spec(&config, &capabilities)
+    build_command_spec(&config, &capabilities).map_err(launch_error)
 }
 
 #[tauri::command]
@@ -132,22 +164,33 @@ pub fn export_legacy_chat_history_command(app: AppHandle) -> Result<String, Stri
 pub fn start_llama_command(
     state: State<'_, LlamaProcessState>,
     config: LaunchConfig,
-) -> Result<RuntimeSnapshot, String> {
-    let binary_path = config
-        .binary_path
-        .as_deref()
-        .ok_or_else(|| "未找到 llama-server，请选择可执行文件。".to_string())?;
+) -> Result<RuntimeSnapshot, CommandError> {
+    let binary_path = config.binary_path.as_deref().ok_or_else(|| {
+        command_error(
+            "server_required",
+            "selectBinary",
+            "未找到 llama-server，请选择可执行文件。",
+        )
+    })?;
     let capabilities = probe_llama_server(binary_path);
     if capabilities.status == ProbeStatus::Invalid {
-        return Err(capabilities.warnings.join("\n"));
+        return Err(command_error(
+            "server_incompatible",
+            "selectBinary",
+            capabilities.warnings.join("\n"),
+        ));
     }
-    let spec = build_command_spec(&config, &capabilities)?;
-    state.start_with_spec(config, spec)
+    let spec = build_command_spec(&config, &capabilities).map_err(launch_error)?;
+    state.start_with_spec(config, spec).map_err(launch_error)
 }
 
 #[tauri::command]
-pub fn stop_llama_command(state: State<'_, LlamaProcessState>) -> Result<RuntimeSnapshot, String> {
-    state.stop()
+pub fn stop_llama_command(
+    state: State<'_, LlamaProcessState>,
+) -> Result<RuntimeSnapshot, CommandError> {
+    state
+        .stop()
+        .map_err(|message| command_error("stop_failed", "retryStop", message))
 }
 
 #[tauri::command]

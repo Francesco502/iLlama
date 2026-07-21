@@ -35,10 +35,17 @@ describe("useAppBootstrap", () => {
           advancedOpen: false,
         },
       },
-      warnings: [],
+      warnings: [
+        {
+          code: "settings_recovered",
+          message: "设置文件损坏，已加载默认设置。",
+          recoveryAction: "viewLogs",
+        },
+      ],
     });
     vi.mocked(resolveLlamaServerPath).mockResolvedValue("/bin/llama-server");
     const setAutoPort = vi.fn();
+    const onWarning = vi.fn();
     const hasBootstrappedRef = { current: false };
     const noop = vi.fn();
 
@@ -46,6 +53,7 @@ describe("useAppBootstrap", () => {
       useAppBootstrap({
         runningInTauri: true,
         appendSystemLog: noop,
+        onWarning,
         hasBootstrappedRef,
         setBinaryPath: noop,
         setAutoPort,
@@ -65,5 +73,8 @@ describe("useAppBootstrap", () => {
 
     await waitFor(() => expect(hasBootstrappedRef.current).toBe(true));
     expect(setAutoPort).toHaveBeenCalledWith(false);
+    expect(onWarning).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "settings_recovered" }),
+    );
   });
 });

@@ -6,6 +6,7 @@ import type { RuntimeStatus } from "../types/domain";
 interface RuntimeStatusCardProps {
   snapshot: Readonly<RuntimeSnapshot>;
   onStop: () => void;
+  onOpenLogs?: () => void;
 }
 
 const statusLabel: Record<RuntimeStatus, string> = {
@@ -37,7 +38,7 @@ function formatElapsedTime(seconds: number): string {
     .join(":");
 }
 
-export function RuntimeStatusCard({ snapshot, onStop }: RuntimeStatusCardProps) {
+export function RuntimeStatusCard({ snapshot, onStop, onOpenLogs }: RuntimeStatusCardProps) {
   const startedAt = snapshot.activeLaunch?.startedAt ?? null;
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -50,7 +51,22 @@ export function RuntimeStatusCard({ snapshot, onStop }: RuntimeStatusCardProps) 
   }, [startedAt]);
 
   const activeLaunch = snapshot.activeLaunch;
-  if (!activeLaunch) return null;
+  if (!activeLaunch) {
+    if (!snapshot.lastError) return null;
+    return (
+      <section className="runtime-error-banner panel" role="alert">
+        <div>
+          <strong>llama-server 异常退出</strong>
+          <p>{snapshot.lastError}</p>
+        </div>
+        {onOpenLogs && (
+          <button className="ghost-button" type="button" onClick={onOpenLogs}>
+            查看日志
+          </button>
+        )}
+      </section>
+    );
+  }
 
   const uptimeSeconds = elapsedSeconds(activeLaunch.startedAt, nowMs);
   const modelName = activeLaunch.modelId?.trim() || fileNameFromPath(activeLaunch.modelPath);
@@ -99,6 +115,7 @@ export function RuntimeStatusCard({ snapshot, onStop }: RuntimeStatusCardProps) 
           加载较慢，服务仍在启动中
         </p>
       )}
+      {snapshot.lastError && <p className="runtime-error-message" role="alert">{snapshot.lastError}</p>}
     </section>
   );
 }

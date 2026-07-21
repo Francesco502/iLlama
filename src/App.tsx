@@ -61,6 +61,7 @@ import {
   type PrometheusHintsConfig,
 } from "./types/domain";
 import type { AppSettings } from "./api/tauri";
+import type { SettingsWarning } from "./api/tauri";
 
 const DEFAULT_PORT = 8080;
 
@@ -101,6 +102,7 @@ export function App() {
     logPanelHeight: 180,
     advancedOpen: false,
   });
+  const [settingsWarning, setSettingsWarning] = useState<SettingsWarning | null>(null);
 
   const hasBootstrappedRef = useRef(!runningInTauri);
 
@@ -229,6 +231,7 @@ export function App() {
   useAppBootstrap({
     runningInTauri,
     appendSystemLog,
+    onWarning: setSettingsWarning,
     hasBootstrappedRef,
     setBinaryPath,
     setAutoPort,
@@ -499,7 +502,7 @@ export function App() {
         <div className="title-block">
           <Cpu size={16} />
           <h1>iLlama</h1>
-          <span className="version-badge">v3.1.0</span>
+          <span className="version-badge">v{__APP_VERSION__}</span>
         </div>
         <div className="topbar-actions">
           <button className="ghost-button" type="button" onClick={handleSelectBinary}>
@@ -552,7 +555,39 @@ export function App() {
         }
         runContent={
           <div className="config-view">
-            <RuntimeStatusCard snapshot={runtimeSnapshot} onStop={handleStop} />
+            {settingsWarning && (
+              <section className="settings-warning-banner panel" role="alert">
+                <div>
+                  <strong>设置已恢复</strong>
+                  <p>{settingsWarning.message}</p>
+                </div>
+                <div className="settings-warning-actions">
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() =>
+                      setUiSettings((current) => ({ ...current, logPanelOpen: true }))
+                    }
+                  >
+                    查看日志
+                  </button>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => setSettingsWarning(null)}
+                  >
+                    关闭
+                  </button>
+                </div>
+              </section>
+            )}
+            <RuntimeStatusCard
+              snapshot={runtimeSnapshot}
+              onStop={handleStop}
+              onOpenLogs={() =>
+                setUiSettings((current) => ({ ...current, logPanelOpen: true }))
+              }
+            />
             {runtimeSnapshot.activeLaunch && launchDraftChanges.length > 0 && (
               <section className="runtime-draft-notice panel" aria-label="下次启动配置变更">
                 <div>

@@ -106,14 +106,7 @@ export function ParameterPanel({
           </small>
         </div>
       )}
-      <div className="form-grid">
-        <TextField
-          label="CPU 线程"
-          value={String(parameters.threads)}
-          onChange={(v) => update("threads", parseAutoNumber(v))}
-          tooltip="指定运行模型所使用的 CPU 线程数。'auto' 表示自动决定最佳线程数。"
-          presets={[{ label: "自动", value: "auto" }]}
-        />
+      <div className="form-grid parameter-basic-grid">
         <TextField
           label="GPU 层数"
           value={String(parameters.gpuLayers)}
@@ -123,29 +116,6 @@ export function ParameterPanel({
             { label: "自动", value: "auto" },
             { label: "全部", value: "all" },
           ]}
-        />
-        <NumberField
-          label="Batch size"
-          value={parameters.batchSize}
-          onChange={(v) => update("batchSize", v)}
-          tooltip="单次评估的批大小（Batch Size），用于控制 Prompt 处理吞吐量。"
-        />
-        <NumberField
-          label="Micro-batch"
-          value={parameters.ubatchSize}
-          onChange={(v) => update("ubatchSize", v)}
-          tooltip="微批次大小，用于控制指令流的微批大小，通常与 Batch size 相同。"
-        />
-        <SelectField
-          label="Flash Attention"
-          value={parameters.flashAttention}
-          options={[
-            { value: "auto", label: "自动" },
-            { value: "on", label: "开启" },
-            { value: "off", label: "关闭" },
-          ]}
-          onChange={(v) => update("flashAttention", v as StartupParameters["flashAttention"])}
-          tooltip="使用闪光注意力机制（Flash Attention），能有效降低显存并加速推理。"
         />
         <NumberField
           label="端口号"
@@ -158,12 +128,6 @@ export function ParameterPanel({
           enabled={autoPort}
           onToggle={() => onAutoPortChange(!autoPort)}
           tooltip="首选端口被占用时自动寻找可用端口；关闭后端口占用会阻止启动。"
-        />
-        <NumberField
-          label="空闲休眠（秒）"
-          value={parameters.idleSleepSeconds}
-          onChange={(v) => update("idleSleepSeconds", Math.max(0, v))}
-          tooltip="llama-server 空闲多少秒后自动进入休眠状态，以释放 CPU/GPU 资源（0 表示禁用）。"
         />
       </div>
 
@@ -181,6 +145,47 @@ export function ParameterPanel({
           ))}
         </div>
       )}
+
+      <details className="parameter-advanced-details">
+        <summary>高级启动参数</summary>
+        <div className="form-grid parameter-advanced-grid">
+          <TextField
+            label="CPU 线程"
+            value={String(parameters.threads)}
+            onChange={(v) => update("threads", parseAutoNumber(v))}
+            tooltip="指定运行模型所使用的 CPU 线程数。'auto' 表示自动决定最佳线程数。"
+            presets={[{ label: "自动", value: "auto" }]}
+          />
+          <NumberField
+            label="Batch size"
+            value={parameters.batchSize}
+            onChange={(v) => update("batchSize", v)}
+            tooltip="单次评估的批大小（Batch Size），用于控制 Prompt 处理吞吐量。"
+          />
+          <NumberField
+            label="Micro-batch"
+            value={parameters.ubatchSize}
+            onChange={(v) => update("ubatchSize", v)}
+            tooltip="微批次大小，用于控制指令流的微批大小，通常与 Batch size 相同。"
+          />
+          <SelectField
+            label="Flash Attention"
+            value={parameters.flashAttention}
+            options={[
+              { value: "auto", label: "自动" },
+              { value: "on", label: "开启" },
+              { value: "off", label: "关闭" },
+            ]}
+            onChange={(v) => update("flashAttention", v as StartupParameters["flashAttention"])}
+            tooltip="使用闪光注意力机制（Flash Attention），能有效降低显存并加速推理。"
+          />
+          <NumberField
+            label="空闲休眠（秒）"
+            value={parameters.idleSleepSeconds}
+            onChange={(v) => update("idleSleepSeconds", Math.max(0, v))}
+            tooltip="llama-server 空闲多少秒后自动进入休眠状态，以释放 CPU/GPU 资源（0 表示禁用）。"
+          />
+        </div>
 
       <div className="multimodal-config">
         <div className="section-heading">
@@ -267,6 +272,7 @@ export function ParameterPanel({
             onChange={(generationRequired) => onPrometheusHintsChange({ ...prometheusHints, generationRequired })}
           />
         </div>
+      </details>
       </details>
     </section>
   );
