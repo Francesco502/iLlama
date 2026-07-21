@@ -134,6 +134,56 @@ fn rejects_truncated_tensor_data() {
 }
 
 #[test]
+fn rejects_truncated_data_for_current_gguf_v3_tensor_types() {
+    for (tensor_type, block_size) in [(34_u32, 256_u64), (35, 256), (39, 32)] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join(format!("truncated-type-{tensor_type}.gguf"));
+        let mut bytes = header(3, 1, 0);
+        append_tensor(&mut bytes, "weight", &[block_size], tensor_type, 0, &[0]);
+        fs::write(&path, bytes).unwrap();
+
+        let inspection = inspect_gguf(&path);
+
+        assert_eq!(
+            inspection.status,
+            GgufStatus::Invalid,
+            "tensor type {tensor_type} must not be launchable with truncated data"
+        );
+        assert!(inspection.warning.unwrap().contains("tensor data"));
+    }
+}
+
+#[test]
+fn accepts_complete_data_for_current_gguf_v3_tensor_types() {
+    for (tensor_type, block_size, type_size) in
+        [(34_u32, 256_u64, 54_usize), (35, 256, 66), (39, 32, 17)]
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("complete-type-{tensor_type}.gguf"));
+        let mut bytes = header(3, 1, 0);
+        append_tensor(
+            &mut bytes,
+            "weight",
+            &[block_size],
+            tensor_type,
+            0,
+            &vec![0; type_size],
+        );
+        fs::write(&path, bytes).unwrap();
+
+        let inspection = inspect_gguf(&path);
+
+        assert_eq!(
+            inspection.status,
+            GgufStatus::Ready,
+            "tensor type {tensor_type} should be ready when its full block is present"
+        );
+    }
+}
+
+#[test]
 fn rejects_out_of_bounds_offsets_even_for_unknown_tensor_types() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("unknown-type-bad-offset.gguf");

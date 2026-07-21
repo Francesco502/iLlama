@@ -558,7 +558,7 @@ fn tensor_data_bytes(dimensions: &[u64], tensor_type: u32) -> Result<Option<u64>
 }
 
 fn tensor_type_layout(tensor_type: u32) -> Option<&'static (u64, u64)> {
-    const LAYOUTS: [(u64, u64); 31] = [
+    const LAYOUTS: [(u64, u64); 40] = [
         (1, 4),   // F32
         (1, 2),   // F16
         (32, 18), // Q4_0
@@ -590,6 +590,15 @@ fn tensor_type_layout(tensor_type: u32) -> Option<&'static (u64, u64)> {
         (1, 8),
         (256, 56),
         (1, 2),
+        (0, 0),    // removed Q4_0_4_4
+        (0, 0),    // removed Q4_0_4_8
+        (0, 0),    // removed Q4_0_8_8
+        (256, 54), // TQ1_0
+        (256, 66), // TQ2_0
+        (0, 0),    // removed IQ4_NL_4_4
+        (0, 0),    // removed IQ4_NL_4_8
+        (0, 0),    // removed IQ4_NL_8_8
+        (32, 17),  // MXFP4
     ];
     let layout = LAYOUTS.get(tensor_type as usize)?;
     (layout.0 != 0).then_some(layout)
