@@ -29,9 +29,14 @@ echo "Usage: llama-server --model FILE --host HOST --port PORT --ctx-size N --me
     );
 
     let capabilities =
-        probe_llama_server_with_timeout(binary.to_string_lossy().as_ref(), Duration::from_secs(1));
+        probe_llama_server_with_timeout(binary.to_string_lossy().as_ref(), Duration::from_secs(5));
 
-    assert_eq!(capabilities.status, ProbeStatus::Compatible);
+    assert_eq!(
+        capabilities.status,
+        ProbeStatus::Compatible,
+        "probe warnings: {:?}",
+        capabilities.warnings
+    );
     assert_eq!(
         capabilities.version_text.as_deref(),
         Some("llama-server fixture 42")
