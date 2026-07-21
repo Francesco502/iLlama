@@ -515,6 +515,99 @@ button { cursor: default; }
 .panel-title .ghost-button { margin-left: auto; }
 
 /* ─── Model Summary ─── */
+.runtime-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-color: color-mix(in srgb, var(--success) 24%, var(--border));
+}
+.runtime-status-header,
+.runtime-status-title,
+.runtime-status-actions {
+  display: flex;
+  align-items: center;
+}
+.runtime-status-header {
+  justify-content: space-between;
+  gap: 16px;
+}
+.runtime-status-title {
+  min-width: 0;
+  gap: 10px;
+}
+.runtime-status-title .status-dot-live {
+  width: 9px;
+  height: 9px;
+}
+.runtime-status-title > div {
+  min-width: 0;
+}
+.runtime-status-title strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-status-actions {
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.runtime-status-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.runtime-status-facts > div {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+.runtime-status-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+.runtime-status-facts dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-slow-start {
+  margin: 0;
+  padding: 8px 10px;
+  border: 0.5px solid color-mix(in srgb, var(--warning) 32%, transparent);
+  border-radius: 7px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  font-size: 12px;
+}
+.runtime-status-actions .health-chip[data-status="starting"],
+.runtime-status-actions .health-chip[data-status="stopping"] {
+  border-color: color-mix(in srgb, var(--warning) 28%, transparent);
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+.runtime-status-actions .health-chip[data-status="failed"] {
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+.runtime-status-actions .health-chip[data-status="idle"],
+.runtime-status-actions .health-chip[data-status="stopped"] {
+  border-color: var(--border-strong);
+  color: var(--muted-strong);
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+}
 .runtime-draft-notice {
   display: flex;
   align-items: center;
@@ -2289,11 +2382,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   }
 
   .model-summary,
+  .runtime-status-header,
   .connection-summary-header,
   .section-title-row,
   .runtime-smoke-chat-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .runtime-status-actions {
+    align-self: stretch;
+    justify-content: space-between;
+  }
+
+  .runtime-status-facts {
+    grid-template-columns: repeat(3, minmax(84px, 1fr));
   }
 
   .connection-fields {

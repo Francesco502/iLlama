@@ -8,6 +8,7 @@ import { ConnectionPanel } from "./components/ConnectionPanel";
 import { ModelDirectoryPicker } from "./components/ModelDirectoryPicker";
 import { ModelList } from "./components/ModelList";
 import { ParameterPanel } from "./components/ParameterPanel";
+import { RuntimeStatusCard } from "./components/RuntimeStatusCard";
 import { RuntimeSmokeChat } from "./components/RuntimeSmokeChat";
 import { SamplingPanel } from "./components/SamplingPanel";
 import {
@@ -551,6 +552,7 @@ export function App() {
         }
         runContent={
           <div className="config-view">
+            <RuntimeStatusCard snapshot={runtimeSnapshot} onStop={handleStop} />
             {runtimeSnapshot.activeLaunch && launchDraftChanges.length > 0 && (
               <section className="runtime-draft-notice panel" aria-label="下次启动配置变更">
                 <div>
