@@ -39,10 +39,31 @@ export function pickSelectedModelPath(
   models: ModelEntry[],
   preferredPath: string | null,
 ): string | null {
-  if (preferredPath && models.some((model) => model.path === preferredPath)) {
+  const selectableModels = models.filter(isSelectableModel);
+  if (preferredPath && selectableModels.some((model) => model.path === preferredPath)) {
     return preferredPath;
   }
-  return models[0]?.path ?? null;
+  return selectableModels[0]?.path ?? null;
+}
+
+function isSelectableModel(model: ModelEntry): boolean {
+  return model.available && model.metadataStatus !== "invalid";
+}
+
+export function getModelLaunchAssessment(model: ModelEntry | null): {
+  allowed: boolean;
+  error?: string;
+  warning?: string;
+} {
+  if (!model) return { allowed: false, error: "请先选择 GGUF 模型。" };
+  if (model.metadataStatus === "invalid") {
+    return { allowed: false, error: model.metadataError ?? "无效 GGUF 文件。" };
+  }
+  if (!model.available) return { allowed: false, error: "模型文件当前不可用。" };
+  if (model.metadataStatus === "limited") {
+    return { allowed: true, warning: model.metadataError ?? "模型元数据读取不完整。" };
+  }
+  return { allowed: true };
 }
 
 export function reconcileMmprojPathForModel(

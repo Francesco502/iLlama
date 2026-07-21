@@ -68,12 +68,36 @@ export function ModelList({
         )}
         {models.map((model) => {
           const selected = selectedPath === model.path;
+          const invalid = model.metadataStatus === "invalid" || !model.available;
           return (
-            <button className="model-row" data-selected={selected} key={model.path} type="button" onClick={() => onSelect(model.path)}>
+            <button
+              aria-disabled={invalid}
+              aria-selected={selected}
+              className="model-row"
+              data-metadata-status={model.metadataStatus}
+              data-selected={selected}
+              disabled={invalid}
+              key={model.path}
+              role="option"
+              type="button"
+              onClick={() => {
+                if (!invalid) onSelect(model.path);
+              }}
+            >
               <Cpu size={16} />
               <span className="model-row-main">
                 <span className="model-name">{model.fileName}</span>
                 <span className="model-meta">{model.quantization ?? "GGUF"} · {formatBytes(model.sizeBytes)} · {formatDateTime(model.modifiedAt)}</span>
+                {model.metadataStatus === "limited" ? (
+                  <span className="model-metadata-warning">
+                    元数据受限{model.metadataError ? `：${model.metadataError}` : ""}
+                  </span>
+                ) : null}
+                {model.metadataStatus === "invalid" ? (
+                  <span className="model-metadata-error">
+                    不可用{model.metadataError ? `：${model.metadataError}` : "：无效 GGUF 文件"}
+                  </span>
+                ) : null}
               </span>
               {selected ? <Check className="selected-check" size={15} /> : null}
             </button>
@@ -83,4 +107,3 @@ export function ModelList({
     </section>
   );
 }
-

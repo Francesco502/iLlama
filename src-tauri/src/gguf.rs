@@ -15,56 +15,142 @@ pub struct GgufMetadata {
     pub parameter_count: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum GgufStatus {
+    Ready,
+    Limited,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GgufInspection {
+    pub status: GgufStatus,
+    pub metadata: Option<GgufMetadata>,
+    pub warning: Option<String>,
+}
+
+const SUPPORTED_GGUF_VERSIONS: [u32; 2] = [2, 3];
+const MAX_INSPECTED_METADATA_ENTRIES: u64 = 512;
+
 pub fn read_gguf_metadata(path: &Path) -> io::Result<GgufMetadata> {
-    let mut file = File::open(path)?;
-    let mut magic = [0u8; 4];
-    file.read_exact(&mut magic)?;
-    if &magic != b"GGUF" {
-        return Err(io::Error::new(
+    let inspection = inspect_gguf(path);
+    inspection.metadata.ok_or_else(|| {
+        io::Error::new(
             io::ErrorKind::InvalidData,
-            "not a GGUF file",
-        ));
+            inspection
+                .warning
+                .unwrap_or_else(|| "invalid GGUF file".to_string()),
+        )
+    })
+}
+
+pub fn inspect_gguf(path: &Path) -> GgufInspection {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) => return invalid_inspection(format!("unable to open GGUF file: {error}")),
+    };
+    let mut magic = [0u8; 4];
+    if let Err(error) = file.read_exact(&mut magic) {
+        return invalid_inspection(format!("GGUF header is truncated: {error}"));
+    }
+    if &magic != b"GGUF" {
+        return invalid_inspection("invalid GGUF magic".to_string());
     }
 
-    let version = read_u32(&mut file)?;
-    let _tensor_count = read_u64(&mut file)?;
-    let metadata_count = read_u64(&mut file)?;
+    let version = match read_u32(&mut file) {
+        Ok(version) => version,
+        Err(error) => return invalid_inspection(format!("GGUF header is truncated: {error}")),
+    };
+    if !SUPPORTED_GGUF_VERSIONS.contains(&version) {
+        return invalid_inspection(format!("unsupported GGUF version {version}"));
+    }
+    let (tensor_count, metadata_count) = match (read_u64(&mut file), read_u64(&mut file)) {
+        (Ok(tensor_count), Ok(metadata_count)) => (tensor_count, metadata_count),
+        _ => return invalid_inspection("GGUF header is structurally incomplete".to_string()),
+    };
+    if tensor_count > i64::MAX as u64 {
+        return invalid_inspection(format!(
+            "GGUF tensor count {tensor_count} is structurally impossible"
+        ));
+    }
+    if metadata_count > i64::MAX as u64 {
+        return invalid_inspection(format!(
+            "GGUF metadata count {metadata_count} is structurally impossible"
+        ));
+    }
     let mut metadata = GgufMetadata {
         version,
         ..GgufMetadata::default()
     };
 
-    for _ in 0..metadata_count.min(512) {
-        let key = read_string(&mut file)?;
-        let value_type = read_u32(&mut file)?;
-        match value_type {
-            4 => {
-                let value = read_u32(&mut file)?;
-                if key.ends_with(".context_length") {
-                    metadata.context_length = Some(value as u64);
-                } else if key == "general.file_type" {
-                    metadata.quantization = Some(file_type_to_quantization(value));
-                }
-            }
-            8 => {
-                let value = read_string(&mut file)?;
-                match key.as_str() {
-                    "general.architecture" => metadata.architecture = Some(value),
-                    "general.size_label" => metadata.parameter_count = Some(value),
-                    _ => {}
-                }
-            }
-            10 => {
-                let value = read_u64(&mut file)?;
-                if key.ends_with(".context_length") {
-                    metadata.context_length = Some(value);
-                }
-            }
-            _ => skip_scalar_value(&mut file, value_type)?,
+    for _ in 0..metadata_count.min(MAX_INSPECTED_METADATA_ENTRIES) {
+        if let Err(error) = read_metadata_entry(&mut file, &mut metadata) {
+            return GgufInspection {
+                status: GgufStatus::Limited,
+                metadata: Some(metadata),
+                warning: Some(format!(
+                    "GGUF metadata could not be read completely: {error}"
+                )),
+            };
         }
     }
 
-    Ok(metadata)
+    if metadata_count > MAX_INSPECTED_METADATA_ENTRIES {
+        return GgufInspection {
+            status: GgufStatus::Limited,
+            metadata: Some(metadata),
+            warning: Some(format!(
+                "GGUF metadata exceeds the inspection limit of {MAX_INSPECTED_METADATA_ENTRIES} entries"
+            )),
+        };
+    }
+
+    GgufInspection {
+        status: GgufStatus::Ready,
+        metadata: Some(metadata),
+        warning: None,
+    }
+}
+
+fn invalid_inspection(warning: String) -> GgufInspection {
+    GgufInspection {
+        status: GgufStatus::Invalid,
+        metadata: None,
+        warning: Some(warning),
+    }
+}
+
+fn read_metadata_entry(reader: &mut impl Read, metadata: &mut GgufMetadata) -> io::Result<()> {
+    let key = read_string(reader)?;
+    let value_type = read_u32(reader)?;
+    match value_type {
+        4 => {
+            let value = read_u32(reader)?;
+            if key.ends_with(".context_length") {
+                metadata.context_length = Some(value as u64);
+            } else if key == "general.file_type" {
+                metadata.quantization = Some(file_type_to_quantization(value));
+            }
+        }
+        8 => {
+            let value = read_string(reader)?;
+            match key.as_str() {
+                "general.architecture" => metadata.architecture = Some(value),
+                "general.size_label" => metadata.parameter_count = Some(value),
+                _ => {}
+            }
+        }
+        10 => {
+            let value = read_u64(reader)?;
+            if key.ends_with(".context_length") {
+                metadata.context_length = Some(value);
+            }
+        }
+        _ => skip_scalar_value(reader, value_type)?,
+    }
+    Ok(())
 }
 
 /// Map the GGUF `general.file_type` integer to a human-readable quantization name.

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   LaunchConfig,
   LogEntry,
@@ -87,6 +88,19 @@ export interface HealthStatus {
   message: string;
 }
 
+export interface ModelScanProgress {
+  requestId: string;
+  directory: string;
+  filesScanned: number;
+  modelsFound: number;
+}
+
+export interface ModelScanResult {
+  requestId: string;
+  directory: string;
+  models: ModelEntry[];
+}
+
 export function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
 }
@@ -107,8 +121,21 @@ export async function patchSettings(patch: AppSettingsPatch): Promise<SettingsEn
   return invoke<SettingsEnvelope>("patch_settings_command", { patch });
 }
 
-export async function scanModelDirectory(path: string): Promise<ModelEntry[]> {
-  return invoke<ModelEntry[]>("scan_model_directory_command", { path });
+export async function scanModelDirectory(
+  path: string,
+  requestId: string,
+  onProgress?: (progress: ModelScanProgress) => void,
+): Promise<ModelScanResult> {
+  const unlisten = onProgress
+    ? await listen<ModelScanProgress>("model-scan-progress", (event) => {
+        if (event.payload.requestId === requestId) onProgress(event.payload);
+      })
+    : undefined;
+  try {
+    return await invoke<ModelScanResult>("scan_model_directory_command", { path, requestId });
+  } finally {
+    unlisten?.();
+  }
 }
 
 export async function validateLaunchConfig(config: LaunchConfig): Promise<ValidationResult> {

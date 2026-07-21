@@ -35,6 +35,7 @@ import { buildRuntimeConnection } from "./lib/externalClients";
 import { demoModelDirectories, demoModels } from "./state/appStore";
 import {
   buildSettingsSnapshot,
+  getModelLaunchAssessment,
   reconcileMmprojPathForModel,
   resolveLaunchPort,
 } from "./state/appState";
@@ -103,6 +104,7 @@ export function App() {
 
   const profile = getProfileById(profileId);
   const selectedModel = models.find((model) => model.path === selectedModelPath) ?? null;
+  const modelLaunchAssessment = getModelLaunchAssessment(selectedModel);
   const [sampling, setSampling] = useState(profile.sampling);
   const appliedParameterPreset = useMemo(
     () => applyParameterPresetSource(parameterPresetSourceId, selectedModel, startupParameters, sampling),
@@ -357,6 +359,13 @@ export function App() {
       appendSystemLog("请先选择 GGUF 模型。");
       return;
     }
+    if (!modelLaunchAssessment.allowed) {
+      appendSystemLog(modelLaunchAssessment.error ?? "该模型无法启动。");
+      return;
+    }
+    if (modelLaunchAssessment.warning) {
+      appendSystemLog(`模型元数据警告：${modelLaunchAssessment.warning}`);
+    }
 
     if (!runningInTauri) {
       await startProcess({
@@ -430,6 +439,7 @@ export function App() {
 
   function handleSelectModel(path: string) {
     const nextModel = models.find((model) => model.path === path) ?? null;
+    if (!getModelLaunchAssessment(nextModel).allowed) return;
     setSelectedModelPath(path);
     setStartupParameters((current) => {
       const mmprojPath = reconcileMmprojPathForModel(current.mmprojPath, nextModel);
@@ -468,7 +478,9 @@ export function App() {
           <button
             className="start-button"
             type="button"
-            disabled={canStop || isStartPending || isLaunchTransactionPending}
+            disabled={
+              canStop || isStartPending || isLaunchTransactionPending || !modelLaunchAssessment.allowed
+            }
             onClick={handleStart}
           >
             {runtimeStatus === "starting" || isStartPending || isLaunchTransactionPending ? (
@@ -494,6 +506,7 @@ export function App() {
               onAddDirectory={modelScan.handleAddDirectory}
               onRemoveDirectory={modelScan.handleRemoveDirectory}
               onRefresh={handleRefresh}
+              onRescanDirectory={modelScan.scanDirectory}
             />
             <ModelList
               models={sortedModels}

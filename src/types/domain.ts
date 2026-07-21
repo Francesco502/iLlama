@@ -14,6 +14,11 @@ export type FlashAttentionSetting = "auto" | "on" | "off";
 export interface ModelDirectory {
   path: string;
   status: "ready" | "missing" | "scanning";
+  progress?: {
+    filesScanned: number;
+    modelsFound: number;
+  };
+  lastError?: string;
 }
 
 export interface ModelEntry {
@@ -26,7 +31,7 @@ export interface ModelEntry {
   quantization?: string;
   contextLength?: number;
   parameterCount?: string;
-  metadataStatus: "ready" | "unreadable" | "pending";
+  metadataStatus: "ready" | "limited" | "invalid";
   metadataError?: string;
   available: boolean;
   mmprojCandidates: string[];

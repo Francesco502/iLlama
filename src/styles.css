@@ -280,11 +280,21 @@ button { cursor: default; }
   font-size: 11px;
   border-radius: 5px;
 }
-.directory-row span:last-child {
+.directory-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.directory-path,
+.directory-detail,
+.directory-error {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.directory-detail { color: var(--muted); font-size: 10px; }
+.directory-error { color: var(--danger); font-size: 10px; }
 
 .status-dot {
   width: 6px; height: 6px;
@@ -381,6 +391,15 @@ button { cursor: default; }
   transform: translateY(-1.5px);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.04);
 }
+.model-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+.model-row:disabled:hover {
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
 .model-row svg { color: var(--muted); }
 .model-row-main { min-width: 0; }
 .model-name, .model-meta {
@@ -391,6 +410,17 @@ button { cursor: default; }
 }
 .model-name { font-size: 12px; font-weight: 600; }
 .model-meta { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.model-metadata-warning,
+.model-metadata-error {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-metadata-warning { color: var(--warning, #a15c00); }
+.model-metadata-error { color: var(--danger); }
 .selected-check { color: var(--accent) !important; }
 
 /* ─── Tab Bar ─── */
@@ -1759,7 +1789,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .directory-row {
   position: relative;
 }
-.directory-remove-btn {
+.directory-remove-btn,
+.directory-rescan-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1775,8 +1806,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   padding: 0;
   box-shadow: none;
 }
-.directory-row:hover .directory-remove-btn {
+.directory-row:hover .directory-remove-btn,
+.directory-row:hover .directory-rescan-btn {
   opacity: 1;
+}
+.directory-rescan-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .directory-remove-btn:hover {
   background: rgba(255, 59, 48, 0.1);

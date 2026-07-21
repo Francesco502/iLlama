@@ -2,7 +2,7 @@ use crate::{
     health::{check_http_health, find_available_port, HealthStatus},
     legacy_chat_export::export_legacy_chat_history,
     llama_process::{LlamaProcessState, RuntimeSnapshot},
-    model_scan::{scan_model_directory, ModelEntry},
+    model_scan::{scan_model_directory_with_progress, ModelScanProgress, ModelScanResult},
     parameters::{build_command_args, validate_launch_config, LaunchConfig, ValidationResult},
     server_probe::{
         build_command_spec, probe_llama_server, CommandSpec, ProbeStatus, ServerCapabilities,
@@ -14,7 +14,9 @@ use crate::{
     tray,
 };
 use std::{env, path::PathBuf};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+const MODEL_SCAN_PROGRESS_EVENT: &str = "model-scan-progress";
 
 #[tauri::command]
 pub fn validate_launch_config_command(config: LaunchConfig) -> ValidationResult {
@@ -47,8 +49,30 @@ pub fn build_command_spec_command(
 }
 
 #[tauri::command]
-pub async fn scan_model_directory_command(path: String) -> Result<Vec<ModelEntry>, String> {
-    scan_model_directory(path.as_ref()).map_err(|error| error.to_string())
+pub async fn scan_model_directory_command(
+    app: AppHandle,
+    path: String,
+    request_id: String,
+) -> Result<ModelScanResult, String> {
+    scan_model_directory_in_background(path, request_id, move |progress| {
+        let _ = app.emit(MODEL_SCAN_PROGRESS_EVENT, progress);
+    })
+    .await
+}
+
+pub async fn scan_model_directory_in_background(
+    path: String,
+    request_id: String,
+    mut on_progress: impl FnMut(ModelScanProgress) + Send + 'static,
+) -> Result<ModelScanResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scan_model_directory_with_progress(path.as_ref(), request_id, |progress| {
+            on_progress(progress.clone());
+        })
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("model scan task failed: {error}"))?
 }
 
 #[tauri::command]

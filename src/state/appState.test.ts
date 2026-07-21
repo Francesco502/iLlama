@@ -4,6 +4,7 @@ import type { ModelDirectory, ModelEntry } from "../types/domain";
 import { emptyPrometheusHintsConfig } from "../types/domain";
 import {
   buildSettingsSnapshot,
+  getModelLaunchAssessment,
   mergeScannedModels,
   pickSelectedModelPath,
   reconcileMmprojPathForModel,
@@ -51,6 +52,47 @@ describe("app state helpers", () => {
 
     expect(pickSelectedModelPath(models, "/models/a/model-c.gguf")).toBe("/models/a/model-c.gguf");
     expect(pickSelectedModelPath(models, "/missing.gguf")).toBe("/models/a/model-a.gguf");
+  });
+
+  it("never restores or automatically selects an invalid model", () => {
+    const invalid = {
+      ...baseModel,
+      metadataStatus: "invalid" as const,
+      available: false,
+      metadataError: "invalid GGUF magic",
+    };
+    const limited = {
+      ...baseModel,
+      path: "/models/a/limited.gguf",
+      metadataStatus: "limited" as const,
+      metadataError: "metadata truncated",
+    };
+
+    expect(pickSelectedModelPath([invalid, limited], invalid.path)).toBe(limited.path);
+    expect(pickSelectedModelPath([invalid], invalid.path)).toBeNull();
+  });
+
+  it("blocks invalid model launches but allows limited models with a warning", () => {
+    const invalid = {
+      ...baseModel,
+      metadataStatus: "invalid" as const,
+      available: false,
+      metadataError: "invalid GGUF magic",
+    };
+    const limited = {
+      ...baseModel,
+      metadataStatus: "limited" as const,
+      metadataError: "metadata truncated",
+    };
+
+    expect(getModelLaunchAssessment(invalid)).toEqual({
+      allowed: false,
+      error: "invalid GGUF magic",
+    });
+    expect(getModelLaunchAssessment(limited)).toEqual({
+      allowed: true,
+      warning: "metadata truncated",
+    });
   });
 
   it("auto-selects the only mmproj candidate for a newly selected model", () => {
