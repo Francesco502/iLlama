@@ -6,6 +6,27 @@ on:
   pull_request:
 
 jobs:
+  policy:
+    name: Version and security policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run check:project
+      - run: npm audit --audit-level=high
+      - name: RustSec advisory audit
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
+
   frontend:
     name: Frontend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
