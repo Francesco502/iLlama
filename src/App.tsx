@@ -42,6 +42,7 @@ import { useAppBootstrap } from "./hooks/useAppBootstrap";
 import { useDebouncedSettingsPersist } from "./hooks/useDebouncedSettingsPersist";
 import { useLlamaProcess } from "./hooks/useLlamaProcess";
 import { useCommandPreview } from "./hooks/useCommandPreview";
+import { useExclusiveAsyncAction } from "./hooks/useExclusiveAsyncAction";
 import { useModelDirectoryScanning } from "./hooks/useModelDirectoryScanning";
 import { useAppLogs } from "./hooks/useAppLogs";
 import {
@@ -201,6 +202,8 @@ export function App() {
     setStartupParameters,
   });
   const { handleRefresh } = modelScan;
+  const { pending: isLaunchTransactionPending, run: runLaunchTransaction } =
+    useExclusiveAsyncAction();
 
   useAppBootstrap({
     runningInTauri,
@@ -349,7 +352,7 @@ export function App() {
     appendSystemLog(`已选择 mmproj：${selected}`);
   }
 
-  async function handleStart() {
+  async function performStart() {
     if (!selectedModel) {
       appendSystemLog("请先选择 GGUF 模型。");
       return;
@@ -421,6 +424,10 @@ export function App() {
     await startProcess(launchConfig);
   }
 
+  async function handleStart() {
+    await runLaunchTransaction(performStart);
+  }
+
   function handleSelectModel(path: string) {
     const nextModel = models.find((model) => model.path === path) ?? null;
     setSelectedModelPath(path);
@@ -461,15 +468,17 @@ export function App() {
           <button
             className="start-button"
             type="button"
-            disabled={canStop || isStartPending}
+            disabled={canStop || isStartPending || isLaunchTransactionPending}
             onClick={handleStart}
           >
-            {runtimeStatus === "starting" || isStartPending ? (
+            {runtimeStatus === "starting" || isStartPending || isLaunchTransactionPending ? (
               <Loader2 size={13} className="spin" />
             ) : (
               <Play size={13} />
             )}
-            {runtimeStatus === "starting" || isStartPending ? "启动中..." : "启动"}
+            {runtimeStatus === "starting" || isStartPending || isLaunchTransactionPending
+              ? "启动中..."
+              : "启动"}
           </button>
         </div>
       </header>
