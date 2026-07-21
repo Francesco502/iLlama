@@ -8,8 +8,8 @@ use crate::{
         build_command_spec, probe_llama_server, CommandSpec, ProbeStatus, ServerCapabilities,
     },
     settings::{
-        load_settings_envelope_from, resolve_llama_server_path, settings_path, AppSettings,
-        SettingsEnvelope, SettingsStore,
+        load_settings_envelope_from, resolve_llama_server_path, settings_path, SettingsEnvelope,
+        SettingsStore,
     },
     tray,
 };
@@ -32,12 +32,17 @@ pub fn probe_llama_server_command(path: String) -> ServerCapabilities {
 }
 
 #[tauri::command]
-pub fn build_command_spec_command(config: LaunchConfig) -> Result<CommandSpec, String> {
+pub fn build_command_spec_command(
+    config: LaunchConfig,
+    capabilities: Option<ServerCapabilities>,
+) -> Result<CommandSpec, String> {
     let binary_path = config
         .binary_path
         .as_deref()
         .ok_or_else(|| "未找到 llama-server，请选择可执行文件。".to_string())?;
-    let capabilities = probe_llama_server(binary_path);
+    let capabilities = capabilities
+        .filter(|capabilities| capabilities.binary_path == binary_path)
+        .unwrap_or_else(|| probe_llama_server(binary_path));
     build_command_spec(&config, &capabilities)
 }
 
@@ -76,21 +81,6 @@ pub fn resolve_llama_server_path_command(
         &env::var("PATH").unwrap_or_default(),
     )
     .map(|path| path.to_string_lossy().to_string())
-}
-
-#[tauri::command]
-pub async fn save_settings_command(
-    app: AppHandle,
-    store: State<'_, SettingsStore>,
-    settings: AppSettings,
-) -> Result<(), String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?;
-    store
-        .save(&settings_path(app_data_dir), &settings)
-        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

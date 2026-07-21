@@ -39,6 +39,8 @@ interface UseLlamaProcessOptions {
 
 export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLlamaProcessOptions) {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(idleSnapshot);
+  const [isStartPending, setIsStartPending] = useState(false);
+  const startPendingRef = useRef(false);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nextStartupDelayRef = useRef(HEALTH_STARTUP_INITIAL_DELAY_MS);
   const healthyNotifiedRef = useRef(false);
@@ -115,6 +117,9 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
 
   const handleStart = useCallback(
     async (config: LaunchConfig) => {
+      if (startPendingRef.current) return;
+      startPendingRef.current = true;
+      setIsStartPending(true);
       stopHealthPoll();
       const generation = generationRef.current;
       healthyNotifiedRef.current = false;
@@ -144,6 +149,8 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
         };
         applySnapshot(preview);
         appendSystemLog("浏览器预览模式已模拟启动。");
+        startPendingRef.current = false;
+        setIsStartPending(false);
         return;
       }
 
@@ -160,6 +167,9 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
         const message = error instanceof Error ? error.message : String(error);
         setSnapshot((current) => ({ ...current, status: "failed", lastError: message }));
         appendSystemLog(message);
+      } finally {
+        startPendingRef.current = false;
+        setIsStartPending(false);
       }
     },
     [appendSystemLog, applySnapshot, startHealthPoll, stopHealthPoll],
@@ -192,6 +202,7 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
     runtimeStatus: snapshot.status,
     runtimeMetrics: snapshot.metrics,
     canStop: snapshot.pid !== null,
+    isStartPending,
     handleStart,
     handleStop,
     stopHealthPoll,

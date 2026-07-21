@@ -1555,7 +1555,7 @@ button { cursor: default; }
 }
 .log-drawer[data-open="true"] {
   min-height: 96px;
-  max-height: 480px;
+  max-height: 360px;
   border-top: 0.5px solid var(--border);
   overflow: visible;
 }

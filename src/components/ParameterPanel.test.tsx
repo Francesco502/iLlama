@@ -9,6 +9,33 @@ import type { PrometheusHintsConfig, StartupParameters } from "../types/domain";
 import { emptyPrometheusHintsConfig } from "../types/domain";
 
 describe("ParameterPanel", () => {
+  it("allows the automatic port preference to be changed", async () => {
+    const user = userEvent.setup();
+    const onAutoPortChange = vi.fn();
+    const profile = getProfileById("custom");
+    render(
+      <ParameterPanel
+        profile={profile}
+        parameters={profile.parameters}
+        port={8080}
+        onPortChange={vi.fn()}
+        autoPort={false}
+        onAutoPortChange={onAutoPortChange}
+        prometheusHints={emptyPrometheusHintsConfig()}
+        parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+        parameterPresetSources={parameterPresetSources}
+        appliedParameterPresetName="Llama 通用"
+        onParameterPresetSourceChange={vi.fn()}
+        onPrometheusHintsChange={vi.fn()}
+        onParametersChange={vi.fn()}
+        onProfileChange={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "自动端口" }));
+    expect(onAutoPortChange).toHaveBeenCalledWith(true);
+  });
+
   it("emits updated context size values", async () => {
     const user = userEvent.setup();
     const profile = getProfileById("custom");

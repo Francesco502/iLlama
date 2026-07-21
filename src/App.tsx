@@ -16,12 +16,9 @@ import {
   resolveLlamaServerPath,
   getTrayEnabled,
   setTrayEnabled,
-  buildCommandSpec,
 } from "./api/tauri";
 import { exportLegacyChatHistory } from "./api/legacyChatExport";
 import {
-  buildCommandPreview,
-  buildCapabilityFilteredPreview,
   buildMaxCapabilitySampling,
   buildMaxCapabilityStartupParameters,
   getProfileById,
@@ -44,6 +41,7 @@ import {
 import { useAppBootstrap } from "./hooks/useAppBootstrap";
 import { useDebouncedSettingsPersist } from "./hooks/useDebouncedSettingsPersist";
 import { useLlamaProcess } from "./hooks/useLlamaProcess";
+import { useCommandPreview } from "./hooks/useCommandPreview";
 import { useModelDirectoryScanning } from "./hooks/useModelDirectoryScanning";
 import { useAppLogs } from "./hooks/useAppLogs";
 import {
@@ -125,6 +123,7 @@ export function App() {
     runtimeStatus,
     runtimeMetrics,
     canStop,
+    isStartPending,
     handleStart: startProcess,
     handleStop,
     stopHealthPoll,
@@ -145,37 +144,7 @@ export function App() {
       }),
     [binaryPath, port, prometheusHints, selectedModel?.path, startupParameters],
   );
-  const [commandPreview, setCommandPreview] = useState(() => ({
-    args: buildCommandPreview(previewConfig),
-    warnings: [] as string[],
-  }));
-
-  useEffect(() => {
-    if (!runningInTauri) {
-      setCommandPreview({ args: buildCommandPreview(previewConfig), warnings: [] });
-      return;
-    }
-    if (!previewConfig.binaryPath || !previewConfig.modelPath) {
-      setCommandPreview({ args: [], warnings: [] });
-      return;
-    }
-    let current = true;
-    setCommandPreview({ args: [], warnings: ["正在根据 llama-server 能力生成命令预览…"] });
-    void buildCapabilityFilteredPreview(previewConfig, buildCommandSpec)
-      .then((preview) => {
-        if (current) setCommandPreview(preview);
-      })
-      .catch((error) => {
-        if (!current) return;
-        setCommandPreview({
-          args: [],
-          warnings: [`命令预览探测失败：${error instanceof Error ? error.message : String(error)}`],
-        });
-      });
-    return () => {
-      current = false;
-    };
-  }, [previewConfig, runningInTauri]);
+  const commandPreview = useCommandPreview(previewConfig, runningInTauri);
 
   const launchValidation = useMemo(
     () =>
@@ -492,15 +461,15 @@ export function App() {
           <button
             className="start-button"
             type="button"
-            disabled={canStop}
+            disabled={canStop || isStartPending}
             onClick={handleStart}
           >
-            {runtimeStatus === "starting" ? (
+            {runtimeStatus === "starting" || isStartPending ? (
               <Loader2 size={13} className="spin" />
             ) : (
               <Play size={13} />
             )}
-            {runtimeStatus === "starting" ? "启动中..." : "启动"}
+            {runtimeStatus === "starting" || isStartPending ? "启动中..." : "启动"}
           </button>
         </div>
       </header>
@@ -572,6 +541,8 @@ export function App() {
               modelContextLength={selectedModel?.contextLength ?? null}
               port={port}
               onPortChange={setPort}
+              autoPort={autoPort}
+              onAutoPortChange={setAutoPort}
               mmprojCandidates={selectedModel?.mmprojCandidates ?? []}
               onSelectMmproj={handleSelectMmproj}
               validation={launchValidation}

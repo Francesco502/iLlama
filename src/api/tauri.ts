@@ -99,10 +99,6 @@ export async function resolveLlamaServerPath(requestedPath?: string | null): Pro
   return invoke<string | null>("resolve_llama_server_path_command", { requestedPath });
 }
 
-export async function saveSettings(settings: AppSettings): Promise<void> {
-  await invoke("save_settings_command", { settings });
-}
-
 export type AppSettingsPatch = Omit<Partial<AppSettings>, "ui"> & {
   ui?: Partial<AppSettings["ui"]>;
 };
@@ -127,8 +123,11 @@ export async function probeLlamaServer(path: string): Promise<ServerCapabilities
   return invoke<ServerCapabilities>("probe_llama_server_command", { path });
 }
 
-export async function buildCommandSpec(config: LaunchConfig): Promise<CommandSpec> {
-  return invoke<CommandSpec>("build_command_spec_command", { config });
+export async function buildCommandSpec(
+  config: LaunchConfig,
+  capabilities?: ServerCapabilities,
+): Promise<CommandSpec> {
+  return invoke<CommandSpec>("build_command_spec_command", { config, capabilities });
 }
 
 export async function startLlama(config: LaunchConfig): Promise<RuntimeSnapshot> {

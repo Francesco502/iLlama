@@ -9,6 +9,8 @@ interface ParameterPanelProps {
   modelContextLength?: number | null;
   port: number;
   onPortChange: (port: number) => void;
+  autoPort?: boolean;
+  onAutoPortChange?: (enabled: boolean) => void;
   mmprojCandidates?: string[];
   onSelectMmproj?: () => void;
   validation?: ValidationResult;
@@ -24,6 +26,7 @@ interface ParameterPanelProps {
 
 export function ParameterPanel({
   profile, parameters, modelContextLength, port, onPortChange,
+  autoPort = true, onAutoPortChange = () => {},
   mmprojCandidates = [], onSelectMmproj,
   validation,
   prometheusHints,
@@ -141,6 +144,12 @@ export function ParameterPanel({
           value={port}
           onChange={onPortChange}
           tooltip="llama-server 本地 API 监听的 TCP 端口号。"
+        />
+        <ToggleRow
+          label="自动端口"
+          enabled={autoPort}
+          onToggle={() => onAutoPortChange(!autoPort)}
+          tooltip="首选端口被占用时自动寻找可用端口；关闭后端口占用会阻止启动。"
         />
         <NumberField
           label="空闲休眠（秒）"

@@ -382,7 +382,7 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
     settings.launch_draft.parameter_preset_source_id =
         normalize_parameter_preset_source(settings.launch_draft.parameter_preset_source_id);
     settings.launch_draft.port = settings.launch_draft.port.max(1024);
-    settings.ui.log_panel_height = settings.ui.log_panel_height.clamp(96, 480);
+    settings.ui.log_panel_height = settings.ui.log_panel_height.clamp(96, 360);
     settings.sampling.max_tokens = settings.sampling.max_tokens.max(1);
     settings
 }

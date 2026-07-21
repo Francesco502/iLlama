@@ -158,11 +158,22 @@ fn round_trips_the_full_supported_log_panel_height() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("settings.json");
     let mut settings = default_settings();
-    settings.ui.log_panel_height = 480;
+    settings.ui.log_panel_height = 360;
 
     save_settings_to(&path, &settings).unwrap();
 
-    assert_eq!(load_settings_from(&path).unwrap().ui.log_panel_height, 480);
+    assert_eq!(load_settings_from(&path).unwrap().ui.log_panel_height, 360);
+}
+
+#[test]
+fn clamps_legacy_log_panel_height_to_the_supported_maximum() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let mut settings = default_settings();
+    settings.ui.log_panel_height = 480;
+    save_settings_to(&path, &settings).unwrap();
+
+    assert_eq!(load_settings_from(&path).unwrap().ui.log_panel_height, 360);
 }
 
 #[test]

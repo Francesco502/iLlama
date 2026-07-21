@@ -43,7 +43,7 @@ const statusLabel: Record<RuntimeStatus, string> = {
 };
 
 const MIN_LOG_DRAWER_HEIGHT = 96;
-const MAX_LOG_DRAWER_HEIGHT = 480;
+const MAX_LOG_DRAWER_HEIGHT = 360;
 const LOG_DRAWER_KEYBOARD_STEP = 24;
 
 function clampLogDrawerHeight(height: number): number {

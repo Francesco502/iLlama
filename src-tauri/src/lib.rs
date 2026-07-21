@@ -26,7 +26,6 @@ pub fn run() {
             commands::scan_model_directory_command,
             commands::load_settings_command,
             commands::resolve_llama_server_path_command,
-            commands::save_settings_command,
             commands::patch_settings_command,
             commands::export_legacy_chat_history_command,
             commands::start_llama_command,

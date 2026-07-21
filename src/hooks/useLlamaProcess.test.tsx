@@ -69,6 +69,7 @@ const startingSnapshot: RuntimeSnapshot = {
 
 describe("useLlamaProcess", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.useFakeTimers();
     vi.mocked(startLlama).mockResolvedValue(startingSnapshot);
     vi.mocked(runtimeSnapshot).mockResolvedValue(startingSnapshot);
@@ -137,5 +138,32 @@ describe("useLlamaProcess", () => {
 
     expect(result.current.snapshot.pid).toBe(84);
     expect(result.current.snapshot.activeLaunch?.modelPath).toBe("/models/b.gguf");
+  });
+
+  it("coalesces repeated starts while the first start request is in flight", async () => {
+    let resolveStart!: (snapshot: RuntimeSnapshot) => void;
+    vi.mocked(startLlama).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const { result } = renderHook(() =>
+      useLlamaProcess({ appendSystemLog: vi.fn(), mergeLogs: vi.fn() }),
+    );
+
+    let firstStart!: Promise<void>;
+    act(() => {
+      firstStart = result.current.handleStart(config);
+    });
+    expect(result.current.isStartPending).toBe(true);
+    await act(async () => result.current.handleStart(config));
+    expect(startLlama).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveStart(startingSnapshot);
+      await firstStart;
+    });
+    expect(result.current.isStartPending).toBe(false);
+    expect(result.current.canStop).toBe(true);
   });
 });
