@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildMaxCapabilitySampling,
   buildMaxCapabilityStartupParameters,
@@ -8,6 +8,7 @@ import {
   getProfileById,
   validateLaunchConfig,
 } from "./parameterSchema";
+import * as parameterSchema from "./parameterSchema";
 import type { LaunchConfig } from "../types/domain";
 import { emptyPrometheusHintsConfig } from "../types/domain";
 
@@ -35,11 +36,48 @@ const baseConfig: LaunchConfig = {
 };
 
 describe("parameter schema", () => {
+  it("builds command previews from the backend capability-filtered command spec", async () => {
+    expect(parameterSchema.buildCapabilityFilteredPreview).toBeTypeOf("function");
+    const config = {
+      binaryPath: "/Applications/llama server",
+      modelPath: "/Models/Test.gguf",
+      host: "127.0.0.1" as const,
+      port: 8080,
+      parameters: getProfileById("custom").parameters,
+      prometheusHints: emptyPrometheusHintsConfig(),
+    };
+    const buildSpec = vi.fn().mockResolvedValue({
+      executable: "/Applications/llama server",
+      args: ["--model", "/Models/Test.gguf", "--port", "8080"],
+      warnings: ["当前 llama-server 不支持 --metrics，已从启动命令省略。"],
+      capabilities: {
+        binaryPath: "/Applications/llama server",
+        versionText: "llama-server 1",
+        supportedFlags: ["--model", "--host", "--port"],
+        status: "limited" as const,
+        warnings: [],
+      },
+    });
+
+    const preview = await parameterSchema.buildCapabilityFilteredPreview(config, buildSpec);
+
+    expect(buildSpec).toHaveBeenCalledWith(config);
+    expect(preview).toEqual({
+      args: [
+        "/Applications/llama server",
+        "--model",
+        "/Models/Test.gguf",
+        "--port",
+        "8080",
+      ],
+      warnings: ["当前 llama-server 不支持 --metrics，已从启动命令省略。"],
+    });
+  });
   it("builds a stable balanced llama-server command preview", () => {
     const preview = buildCommandPreview(baseConfig);
 
     expect(preview).toEqual([
-      "llama-server",
+      "/usr/local/bin/llama-server",
       "--model",
       "/models/qwen2.5-7b-instruct-q4_k_m.gguf",
       "--host",
@@ -115,8 +153,9 @@ describe("parameter schema", () => {
     expect(result.errors).toContain("Micro-batch 不能大于 batch size。");
   });
 
-  it("exposes only maximum capability and custom parameter modes", () => {
+  it("exposes only automatic and custom parameter modes", () => {
     expect(builtInProfiles.map((profile) => profile.id)).toEqual(["max-capability", "custom"]);
+    expect(getProfileById("max-capability").name).toBe("自动配置");
 
     const profile = getProfileById("custom");
     expect(profile.name).toBe("自定义");
@@ -137,8 +176,7 @@ describe("parameter schema", () => {
     expect(parameters.gpuLayers).toBe("all");
     expect(parameters.batchSize).toBe(2048);
     expect(parameters.ubatchSize).toBe(512);
-    expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(65_536));
-    expect(sampling.maxTokens).toBeLessThan(65_536);
+    expect(sampling.maxTokens).toBe(2048);
   });
 
   it("uses the full 256k model context in maximum capability mode", () => {
@@ -146,8 +184,7 @@ describe("parameter schema", () => {
     const sampling = buildMaxCapabilitySampling(parameters.ctxSize, defaultSampling());
 
     expect(parameters.ctxSize).toBe(262_144);
-    expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(262_144));
-    expect(sampling.maxTokens).toBeLessThan(262_144);
+    expect(sampling.maxTokens).toBe(2048);
   });
 
   it("does not impose a fixed app ceiling when model metadata reports a larger context", () => {
@@ -155,9 +192,12 @@ describe("parameter schema", () => {
     const sampling = buildMaxCapabilitySampling(parameters.ctxSize, defaultSampling());
 
     expect(parameters.ctxSize).toBe(524_288);
-    expect(sampling.maxTokens).toBe(calculateMaxOutputTokens(524_288));
-    expect(sampling.maxTokens).toBeGreaterThan(calculateMaxOutputTokens(262_144));
-    expect(sampling.maxTokens).toBeLessThan(524_288);
+    expect(sampling.maxTokens).toBe(2048);
+  });
+
+  it("reserves most of a small context window for prompts", () => {
+    expect(calculateMaxOutputTokens(4096)).toBe(1024);
+    expect(calculateMaxOutputTokens(8192)).toBe(2048);
   });
 });
 

@@ -5,6 +5,8 @@ import {
   checkRuntimeConnection,
   externalClientProfiles,
 } from "./externalClients";
+import type { RuntimeSnapshot } from "../api/tauri";
+import { resolvedStartupParametersFixture } from "../test/resolvedStartupParameters";
 
 describe("external client connection helpers", () => {
   it("builds OpenAI-compatible endpoint details from the active runtime", () => {
@@ -31,6 +33,93 @@ describe("external client connection helpers", () => {
 
     expect(connection.model).toBe("local");
     expect(connection.healthy).toBe(false);
+  });
+
+  it("uses the backend active launch instead of edited draft values", () => {
+    const snapshot: RuntimeSnapshot = {
+      status: "healthy",
+      pid: 42,
+      startedAt: "2026-07-21T00:00:00Z",
+      activeModelPath: "/models/a.gguf",
+      activeLaunch: {
+        binaryPath: "/bin/llama-server",
+        modelPath: "/models/a.gguf",
+        host: "127.0.0.1",
+        port: 8080,
+        parameters: resolvedStartupParametersFixture({
+          ctxSize: 4096,
+          threads: "auto",
+          threadsBatch: "auto",
+          gpuLayers: "all",
+          batchSize: 512,
+          ubatchSize: 128,
+          flashAttention: "auto",
+          mmap: true,
+          mlock: false,
+          metrics: true,
+          idleSleepSeconds: 0,
+          mmprojPath: null,
+          mmprojOffload: true,
+        }),
+        commandArgs: [],
+        prometheusHints: {
+          kvSubstrings: [],
+          promptSubstrings: [],
+          generationAnyOf: [],
+          generationRequired: [],
+        },
+        startedAt: "2026-07-21T00:00:00Z",
+        modelId: "active-model",
+        serverCapabilities: null,
+      },
+      lastError: null,
+      metrics: {
+        cpuPercent: null,
+        memoryBytes: null,
+        tokensPerSecond: null,
+        promptTokensPerSecond: null,
+        kvCacheUsageRatio: null,
+      },
+      logs: [],
+    };
+
+    const connection = buildRuntimeConnection({
+      snapshot,
+      draftPort: 9090,
+      draftModelName: "b.gguf",
+    });
+
+    expect(connection.port).toBe(8080);
+    expect(connection.model).toBe("active-model");
+    expect(connection.source).toBe("active");
+  });
+
+  it("does not report a healthy draft when no active launch exists", () => {
+    const snapshot: RuntimeSnapshot = {
+      status: "healthy",
+      pid: null,
+      startedAt: null,
+      activeModelPath: null,
+      activeLaunch: null,
+      lastError: null,
+      metrics: {
+        cpuPercent: null,
+        memoryBytes: null,
+        tokensPerSecond: null,
+        promptTokensPerSecond: null,
+        kvCacheUsageRatio: null,
+      },
+      logs: [],
+    };
+
+    const connection = buildRuntimeConnection({
+      snapshot,
+      draftPort: 9090,
+      draftModelName: "draft.gguf",
+    });
+
+    expect(connection.healthy).toBe(false);
+    expect(connection.source).toBe("draft");
   });
 
   it("ships launcher-oriented profiles for common external clients", () => {
@@ -82,5 +171,32 @@ describe("external client connection helpers", () => {
     expect(result.healthOk).toBe(true);
     expect(result.modelsOk).toBe(true);
     expect(result.models).toEqual(["local"]);
+  });
+
+  it("times out health after 2 seconds", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.endsWith("/health")) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          });
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: [{ id: "local" }] }), { status: 200 }),
+        );
+      }),
+    );
+
+    const pending = checkRuntimeConnection(
+      buildRuntimeConnection({ port: 8080, modelName: "local.gguf", healthy: true }),
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await pending;
+
+    expect(result.healthOk).toBe(false);
+    expect(result.message).toContain("2 秒");
+    vi.useRealTimers();
   });
 });

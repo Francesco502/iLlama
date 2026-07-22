@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { MutableRefObject } from "react";
 import type { AppSettings } from "../api/tauri";
-import { saveSettings } from "../api/tauri";
+import { patchSettings } from "../api/tauri";
 
 export function useDebouncedSettingsPersist(
   runningInTauri: boolean,
@@ -15,7 +15,8 @@ export function useDebouncedSettingsPersist(
     (snapshot: AppSettings) => {
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
       persistTimerRef.current = setTimeout(() => {
-        void saveSettings(snapshot).catch((error) => {
+        const { showInMenuBar: _trayPreference, ...ui } = snapshot.ui;
+        void patchSettings({ ...snapshot, ui }).catch((error) => {
           appendSystemLog(error instanceof Error ? error.message : String(error));
         });
       }, 1500);

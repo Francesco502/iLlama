@@ -1,5 +1,33 @@
 # Changelog
 
+## v3.2.0 - 2026-07-21
+
+### Added
+
+- Add authoritative active-launch snapshots containing the actual model, port, PID, uptime, detected model ID, and server capabilities.
+- Add settings schema v3 with serialized patches, atomic persistence, corrupt-file backups, and complete launch/UI preference restoration.
+- Add `llama-server` capability probing and a shared command specification for actual launch and POSIX/PowerShell previews.
+- Add ready, limited, and invalid GGUF classifications with asynchronous progress and stale-scan rejection.
+- Add Playwright and automated accessibility coverage for narrow windows, keyboard flow, dark mode, reduced motion, log docking, and tab scroll restoration.
+
+### Changed
+
+- Redesign the run page as a launch workbench with a fixed actual-runtime card, grouped advanced settings, next-launch draft indication, and a resizable persistent log dock.
+- Rename “最大能力” to “自动配置” and derive the default smoke-test output limit from context size.
+- Make connection and test pages consume the active endpoint and `/v1/models` model ID instead of draft values, file names, or hardcoded aliases.
+- Make macOS Apple Silicon the only formal 3.2.0 distribution target; retain Windows build, test, and preview support without Release assets.
+- Keep `llama-server` external: no bundled sidecar and no binary download.
+- Replace automatic tag publishing with a manual protected workflow for `v3.2.0-rc.1` and `v3.2.0`.
+
+### Fixed
+
+- Keep slow but live server processes in a stoppable starting state instead of reporting false failure after 120 seconds.
+- Prevent draft model or port edits from changing the displayed active connection.
+- Prevent concurrent setting, tray, and debounced UI writes from overwriting one another.
+- Reject invalid GGUF files and omit optional flags unsupported by the selected server.
+- Preserve the last runtime snapshot across temporary IPC polling failures and retain logs after abnormal exits.
+- Block formal publication when signing, notarization, staple, Gatekeeper, checksum, real-GGUF, external-client, or clean-Mac gates are missing.
+
 ## v3.1.0 - 2026-06-18
 
 ### Added

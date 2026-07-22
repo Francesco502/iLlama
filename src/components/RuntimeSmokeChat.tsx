@@ -1,28 +1,28 @@
 import { Trash2, User, Bot, Cpu, Zap, FileText } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useRuntimeSmokeChat } from "../hooks/useRuntimeSmokeChat";
+import type { RuntimeSnapshot } from "../api/tauri";
 import type { ChatAttachment, ChatMessage } from "../types/chat";
-import type { ModelEntry, RuntimeStatus, SamplingParameters } from "../types/domain";
+import type { SamplingParameters } from "../types/domain";
 import { MarkdownContent } from "./MarkdownContent";
 import { SmokeChatComposer } from "./SmokeChatComposer";
 
 interface RuntimeSmokeChatProps {
-  runtimeStatus: RuntimeStatus;
-  selectedModel: ModelEntry | null;
-  port: number;
+  snapshot: RuntimeSnapshot;
   sampling: SamplingParameters;
   appendSystemLog: (message: string) => void;
   onNavigateToRun?: () => void;
 }
 
 export function RuntimeSmokeChat({
-  runtimeStatus,
-  selectedModel,
-  port,
+  snapshot,
   sampling,
   appendSystemLog,
   onNavigateToRun,
 }: RuntimeSmokeChatProps) {
+  const runtimeStatus = snapshot.status;
+  const activeLaunch = snapshot.activeLaunch;
+  const activeModelName = activeLaunch ? fileNameFromPath(activeLaunch.modelPath) : null;
   const {
     messages,
     streaming,
@@ -31,12 +31,20 @@ export function RuntimeSmokeChat({
     cancelGeneration,
     clearMessages,
   } = useRuntimeSmokeChat({
-    port,
+    port: activeLaunch?.port ?? 0,
+    modelId: activeLaunch?.modelId ?? null,
     sampling,
-    modelName: selectedModel?.fileName ?? null,
+    modelName: activeLaunch?.modelId ?? activeModelName,
     appendSystemLog,
   });
-  const disabledReason = runtimeStatus === "healthy" ? (streaming ? "streaming" : undefined) : "runtime";
+  const disabledReason =
+    runtimeStatus !== "healthy" || !activeLaunch
+      ? "runtime"
+      : !activeLaunch.modelId
+        ? "model"
+        : streaming
+          ? "streaming"
+          : undefined;
   const disabled = Boolean(disabledReason);
 
   const threadRef = useRef<HTMLDivElement>(null);
@@ -70,15 +78,15 @@ export function RuntimeSmokeChat({
                 : "服务未启动"}
             </span>
           </div>
-          {selectedModel && (
-            <span className="meta-pill" title={selectedModel.path}>
+          {activeLaunch && (
+            <span className="meta-pill" title={activeLaunch.modelPath}>
               <Cpu size={11} style={{ marginRight: 4, verticalAlign: "middle" }} />
-              {selectedModel.fileName}
+              {activeLaunch.modelId ?? activeModelName}
             </span>
           )}
           <span className="meta-pill">
             <span className="meta-label">端口 </span>
-            <strong>{port}</strong>
+            <strong>{activeLaunch?.port ?? "--"}</strong>
           </span>
           {streamTokensPerSecond != null && (
             <span className="meta-pill speed">
@@ -162,6 +170,10 @@ export function RuntimeSmokeChat({
       />
     </section>
   );
+}
+
+function fileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
 
 function UserSmokeMessageContent({ message }: { message: ChatMessage }) {

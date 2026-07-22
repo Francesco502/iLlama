@@ -1,5 +1,5 @@
 import { ChevronDown, SlidersHorizontal, HelpCircle } from "lucide-react";
-import { useState } from "react";
+import { useId } from "react";
 import { getAdaptiveSafetyFactor } from "../lib/contextBudget";
 import { calculateMaxOutputTokens } from "../lib/parameterSchema";
 import type { ParameterProfile, SamplingParameters } from "../types/domain";
@@ -9,24 +9,48 @@ interface SamplingPanelProps {
   sampling: SamplingParameters;
   ctxSize: number;
   onSamplingChange: (sampling: SamplingParameters) => void;
+  advancedOpen: boolean;
+  onAdvancedOpenChange: (open: boolean) => void;
 }
 
 function FieldLabel({ label, tooltip }: { label: string; tooltip?: string }) {
+  const tooltipId = useId();
   if (!tooltip) {
     return <span>{label}</span>;
   }
   return (
     <span className="field-label-container">
       <span>{label}</span>
-      <span className="tooltip-wrapper" data-tooltip={tooltip} onClick={(e) => e.stopPropagation()}>
+      <span
+        className="tooltip-wrapper"
+        data-tooltip={tooltip}
+        role="button"
+        tabIndex={0}
+        aria-label={`${label}说明`}
+        aria-describedby={tooltipId}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
         <HelpCircle size={12} className="tooltip-icon" />
       </span>
+      <span className="visually-hidden" id={tooltipId} role="tooltip">{tooltip}</span>
     </span>
   );
 }
 
-export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChange }: SamplingPanelProps) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+export function SamplingPanel({
+  parameterMode,
+  sampling,
+  ctxSize,
+  onSamplingChange,
+  advancedOpen,
+  onAdvancedOpenChange,
+}: SamplingPanelProps) {
   function update<K extends keyof SamplingParameters>(key: K, value: SamplingParameters[K]) {
     onSamplingChange({ ...sampling, [key]: value });
   }
@@ -90,7 +114,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
         className="sampling-advanced-toggle"
         aria-expanded={advancedOpen}
         aria-controls="sampling-advanced"
-        onClick={() => setAdvancedOpen((value) => !value)}
+        onClick={() => onAdvancedOpenChange(!advancedOpen)}
       >
         <ChevronDown size={14} data-rotated={advancedOpen} />
         高级采样参数
@@ -134,6 +158,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
           <label className="field">
             <FieldLabel label="随机种子（seed，留空为随机）" tooltip="指定随机数种子以获得可重复的输出结果。留空为随机。" />
             <input
+              aria-label="随机种子（seed，留空为随机）"
               inputMode="numeric"
               onChange={(event) => {
                 const text = event.target.value.trim();
@@ -151,6 +176,7 @@ export function SamplingPanel({ parameterMode, sampling, ctxSize, onSamplingChan
           <label className="field field-wide">
             <FieldLabel label="停用序列（每行一个，stop）" tooltip="遇到这些停用词序列时立即停止生成。每行输入一个。" />
             <textarea
+              aria-label="停用序列（每行一个，stop）"
               rows={3}
               spellCheck={false}
               value={stopJoined}
@@ -248,6 +274,7 @@ function NumberField({
     <label className="field">
       <FieldLabel label={label} tooltip={tooltip} />
       <input
+        aria-label={label}
         inputMode="decimal"
         max={max}
         min={min}

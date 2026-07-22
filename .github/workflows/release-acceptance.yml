@@ -1,0 +1,521 @@
+name: Release acceptance evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact RC/final tag to validate
+        required: true
+        type: choice
+        options: [v3.2.0-rc.1, v3.2.0]
+      evidence_type:
+        description: Acceptance gate
+        required: true
+        type: choice
+        options: [llama-matrix, external-client, clean-mac]
+      rc_release_run_id:
+        description: Clean-Mac only - successful signed RC release workflow run ID
+        required: false
+        type: string
+      accepted_rc_sha256:
+        description: Clean-Mac only - exact lowercase SHA-256 of the accepted RC DMG
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-acceptance-${{ inputs.tag }}-${{ inputs.evidence_type }}
+  cancel-in-progress: false
+
+jobs:
+  validate-dispatch-ref:
+    name: Validate protected acceptance dispatch ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the workflow run itself to use the selected tag
+        shell: bash
+        env:
+          ACTUAL_REF: ${{ github.ref }}
+          EXPECTED_REF: refs/tags/${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$ACTUAL_REF" == "$EXPECTED_REF" ]]
+
+  real-model:
+    name: Real GGUF / native Tauri / curl evidence
+    if: inputs.evidence_type != 'clean-mac' && github.ref == format('refs/tags/{0}', inputs.tag)
+    needs: validate-dispatch-ref
+    runs-on: [self-hosted, macOS, ARM64]
+    environment: macos-release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      EVIDENCE_TYPE: ${{ inputs.evidence_type }}
+      LLAMA_SERVER_PATHS: ${{ secrets.ACCEPTANCE_LLAMA_SERVER_PATHS }}
+      LLAMA_MODEL_PATH: ${{ secrets.ACCEPTANCE_LLAMA_MODEL_PATH }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Validate exact protected acceptance target and required real inputs
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git describe --tags --exact-match HEAD)" == "$RELEASE_TAG" ]]
+          [[ "$(uname -m)" == "arm64" ]]
+          [[ -n "$LLAMA_SERVER_PATHS" ]]
+          [[ -n "$LLAMA_MODEL_PATH" && -f "$LLAMA_MODEL_PATH" ]]
+          IFS=':;' read -r -a binaries <<< "$LLAMA_SERVER_PATHS"
+          [[ "${#binaries[@]}" -gt 0 ]]
+          for binary in "${binaries[@]}"; do
+            [[ -n "$binary" && -f "$binary" && -x "$binary" ]]
+          done
+          TAGGED_SHA="$(git rev-parse HEAD)"
+          PRIMARY_BINARY="$(node -p 'require("node:fs").realpathSync(process.argv[1])' "${binaries[0]}")"
+          MODEL_PATH="$(node -p 'require("node:fs").realpathSync(process.argv[1])' "$LLAMA_MODEL_PATH")"
+          echo "TAGGED_SHA=$TAGGED_SHA" >> "$GITHUB_ENV"
+          echo "LLAMA_PRIMARY_BINARY=$PRIMARY_BINARY" >> "$GITHUB_ENV"
+          echo "LLAMA_MODEL_PATH=$MODEL_PATH" >> "$GITHUB_ENV"
+          echo "sha=$TAGGED_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Run application-level real GGUF matrix
+        if: inputs.evidence_type == 'llama-matrix'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          LLAMA_MATRIX_REPORT="$RUNNER_TEMP/evidence/matrix-report.json" \
+            npm run release:llama-matrix
+
+      - name: Create and locally validate matrix evidence
+        if: inputs.evidence_type == 'llama-matrix'
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT="$RUNNER_TEMP/evidence/matrix-report.json"
+          artifact_args=(--artifact "model=$LLAMA_MODEL_PATH")
+          index=0
+          while IFS= read -r binary; do
+            [[ -n "$binary" ]] || continue
+            canonical="$(node -p 'require("node:fs").realpathSync(process.argv[1])' "$binary")"
+            if [[ "$index" -eq 0 ]]; then key="binary"; else key="binary-$index"; fi
+            artifact_args+=(--artifact "$key=$canonical")
+            index=$((index + 1))
+          done < <(printf '%s\n' "$LLAMA_SERVER_PATHS" | tr ':;' '\n')
+          [[ "$index" -gt 0 ]]
+          node scripts/create-release-evidence.mjs \
+            --output "$RUNNER_TEMP/evidence/evidence.json" \
+            --type llama-matrix \
+            --report "$REPORT" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release-acceptance.yml" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            "${artifact_args[@]}"
+          node scripts/validate-release-evidence.mjs \
+            --evidence "$RUNNER_TEMP/evidence/evidence.json" \
+            --type llama-matrix \
+            --report "$REPORT" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release-acceptance.yml" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            "${artifact_args[@]}"
+
+      - name: Run native app with executable curl client
+        if: inputs.evidence_type == 'external-client'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          export ILLAMA_EXTERNAL_CLIENT_REPORT="$RUNNER_TEMP/evidence/external-client-report.json"
+          export ILLAMA_EVIDENCE_HEAD_SHA="$TAGGED_SHA"
+          export ILLAMA_EVIDENCE_WORKFLOW_PATH=".github/workflows/release-acceptance.yml"
+          export ILLAMA_EVIDENCE_RUN_ID="$GITHUB_RUN_ID"
+          export ILLAMA_EVIDENCE_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT"
+          export ILLAMA_EVIDENCE_REPOSITORY="$GITHUB_REPOSITORY"
+          node scripts/native-tauri-acceptance.mjs \
+            --binary "$LLAMA_PRIMARY_BINARY" \
+            --model "$LLAMA_MODEL_PATH" \
+            --report "$RUNNER_TEMP/evidence/native-report.json" \
+            --external-client "$GITHUB_WORKSPACE/scripts/external-client-curl.mjs"
+
+      - name: Validate curl execution and create external-client evidence
+        if: inputs.evidence_type == 'external-client'
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT="$RUNNER_TEMP/evidence/external-client-report.json"
+          NATIVE_REPORT="$RUNNER_TEMP/evidence/native-report.json"
+          ENDPOINT="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).endpoint' "$REPORT")"
+          CURL_PATH="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).curl.path' "$REPORT")"
+          node scripts/validate-external-client-evidence.mjs \
+            --report "$REPORT" \
+            --endpoint "$ENDPOINT" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release-acceptance.yml" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            --verify-curl-executable
+          artifacts=(
+            --artifact "binary=$LLAMA_PRIMARY_BINARY"
+            --artifact "model=$LLAMA_MODEL_PATH"
+            --artifact "curl=$CURL_PATH"
+            --artifact "nativeReport=$NATIVE_REPORT"
+          )
+          node scripts/create-release-evidence.mjs \
+            --output "$RUNNER_TEMP/evidence/evidence.json" \
+            --type external-client \
+            --report "$REPORT" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release-acceptance.yml" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            "${artifacts[@]}"
+          node scripts/validate-release-evidence.mjs \
+            --evidence "$RUNNER_TEMP/evidence/evidence.json" \
+            --type external-client \
+            --report "$REPORT" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release-acceptance.yml" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            "${artifacts[@]}"
+
+      - name: Upload exact run-bound evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-${{ inputs.evidence_type }}-${{ steps.target.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  clean-inputs:
+    name: Supply real server and GGUF to the ephemeral Mac
+    if: inputs.evidence_type == 'clean-mac' && github.ref == format('refs/tags/{0}', inputs.tag)
+    needs: validate-dispatch-ref
+    runs-on: [self-hosted, macOS, ARM64]
+    environment: macos-release
+    outputs:
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      LLAMA_SERVER_PATHS: ${{ secrets.ACCEPTANCE_LLAMA_SERVER_PATHS }}
+      LLAMA_MODEL_PATH: ${{ secrets.ACCEPTANCE_LLAMA_MODEL_PATH }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Fail closed unless real acceptance inputs exist
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git describe --tags --exact-match HEAD)" == "$RELEASE_TAG" ]]
+          [[ "$(uname -m)" == "arm64" ]]
+          [[ -n "$LLAMA_SERVER_PATHS" && -n "$LLAMA_MODEL_PATH" ]]
+          IFS=':;' read -r -a binaries <<< "$LLAMA_SERVER_PATHS"
+          [[ "${#binaries[@]}" -gt 0 ]]
+          PRIMARY_BINARY="${binaries[0]}"
+          [[ -f "$PRIMARY_BINARY" && -x "$PRIMARY_BINARY" ]]
+          [[ -f "$LLAMA_MODEL_PATH" ]]
+          mkdir -p "$RUNNER_TEMP/clean-inputs"
+          cp "$PRIMARY_BINARY" "$RUNNER_TEMP/clean-inputs/llama-server"
+          cp "$LLAMA_MODEL_PATH" "$RUNNER_TEMP/clean-inputs/model.gguf"
+          chmod 755 "$RUNNER_TEMP/clean-inputs/llama-server"
+          ARTIFACT_NAME="clean-mac-inputs-$(git rev-parse HEAD)-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ runner.temp }}/clean-inputs
+          if-no-files-found: error
+          retention-days: 1
+
+  clean-mac:
+    name: Downloaded signed RC on ephemeral clean Apple Silicon Mac
+    if: inputs.evidence_type == 'clean-mac' && github.ref == format('refs/tags/{0}', inputs.tag)
+    needs: [validate-dispatch-ref, clean-inputs]
+    runs-on: macos-15
+    environment: macos-release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      RC_RELEASE_RUN_ID: ${{ inputs.rc_release_run_id }}
+      ACCEPTED_RC_SHA256: ${{ inputs.accepted_rc_sha256 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: ${{ needs.clean-inputs.outputs.artifact_name }}
+          path: ${{ runner.temp }}/clean-inputs
+
+      - name: Validate exact clean-Mac target and RC workflow binding
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -m)" == "arm64" ]]
+          [[ "$RELEASE_TAG" == "v3.2.0" ]]
+          [[ "$(git describe --tags --exact-match HEAD)" == "$RELEASE_TAG" ]]
+          TAGGED_SHA="$(git rev-parse HEAD)"
+          [[ "$(git rev-list -n 1 v3.2.0-rc.1)" == "$TAGGED_SHA" ]]
+          [[ "$RC_RELEASE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$ACCEPTED_RC_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ -n "$APPLE_TEAM_ID" ]]
+          RUN_JSON="$RUNNER_TEMP/rc-release-run.json"
+          RUN_ATTEMPT_FILE="$RUNNER_TEMP/rc-release-run.attempt"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RC_RELEASE_RUN_ID" \
+            > "$RUN_JSON" || exit 1
+          node scripts/validate-workflow-run.mjs \
+            --run-json "$RUN_JSON" \
+            --attempt-output "$RUN_ATTEMPT_FILE" \
+            --run-id "$RC_RELEASE_RUN_ID" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release.yml" \
+            --repository "$GITHUB_REPOSITORY" \
+            --head-branch v3.2.0-rc.1 \
+            --event workflow_dispatch || exit 1
+          IFS= read -r RC_RUN_ATTEMPT < "$RUN_ATTEMPT_FILE" || exit 1
+          [[ "$RC_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
+          echo "TAGGED_SHA=$TAGGED_SHA" >> "$GITHUB_ENV"
+          echo "RC_RUN_ATTEMPT=$RC_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "sha=$TAGGED_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Download and validate the exact run-bound signed RC artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/clean-mac" "$RUNNER_TEMP/evidence/raw"
+          RC_ARTIFACT="signed-rc-${TAGGED_SHA}-${RC_RELEASE_RUN_ID}-${RC_RUN_ATTEMPT}"
+          gh run download "$RC_RELEASE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$RC_ARTIFACT" \
+            --dir "$RUNNER_TEMP/clean-mac"
+          DMG="$RUNNER_TEMP/clean-mac/iLlama_3.2.0_aarch64.dmg"
+          CHECKSUM="$DMG.sha256"
+          PROVENANCE="$RUNNER_TEMP/clean-mac/rc-provenance.json"
+          node scripts/rc-artifact-provenance.mjs validate \
+            --provenance "$PROVENANCE" \
+            --dmg "$DMG" \
+            --checksum "$CHECKSUM" \
+            --tag v3.2.0-rc.1 \
+            --mode signed-release \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release.yml" \
+            --run-id "$RC_RELEASE_RUN_ID" \
+            --run-attempt "$RC_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            2>&1 | tee "$RUNNER_TEMP/evidence/raw/rc-provenance.txt"
+          read -r RECORDED_SHA RECORDED_NAME < "$CHECKSUM"
+          [[ "$RECORDED_SHA" == "$ACCEPTED_RC_SHA256" ]]
+          [[ "$RECORDED_NAME" == "iLlama_3.2.0_aarch64.dmg" ]]
+          cp "$PROVENANCE" "$RUNNER_TEMP/evidence/rc-provenance.json"
+          echo "RC_DMG=$DMG" >> "$GITHUB_ENV"
+          echo "RC_CHECKSUM=$CHECKSUM" >> "$GITHUB_ENV"
+          echo "RC_PROVENANCE=$PROVENANCE" >> "$GITHUB_ENV"
+
+      - name: Mount read-only and verify nested signature, team, runtime, notarization, and Gatekeeper
+        id: mount
+        shell: bash
+        run: |
+          set -euo pipefail
+          MOUNT_POINT="$(mktemp -d "$RUNNER_TEMP/illama-mount.XXXXXX")"
+          echo "MOUNT_POINT=$MOUNT_POINT" >> "$GITHUB_ENV"
+          ATTACH_PLIST="$RUNNER_TEMP/evidence/raw/hdiutil-attach.plist"
+          hdiutil attach "$RC_DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT" -plist > "$ATTACH_PLIST"
+          MOUNT_DEVICE="$(
+            plutil -convert json -o - "$ATTACH_PLIST" |
+              jq -r --arg mount "$MOUNT_POINT" \
+                '."system-entities"[] | select(."mount-point" == $mount) | ."dev-entry"' |
+              head -n 1
+          )"
+          [[ "$MOUNT_DEVICE" == /dev/* ]]
+          echo "MOUNT_DEVICE=$MOUNT_DEVICE" >> "$GITHUB_ENV"
+          APP_COUNT="$(find "$MOUNT_POINT" -maxdepth 2 -type d -name '*.app' | wc -l | tr -d ' ')"
+          [[ "$APP_COUNT" == "1" ]]
+          APP_PATH="$(find "$MOUNT_POINT" -maxdepth 2 -type d -name '*.app' -print -quit)"
+          echo "MOUNTED_APP=$APP_PATH" >> "$GITHUB_ENV"
+
+          spctl --status 2>&1 | tee "$RUNNER_TEMP/evidence/raw/spctl-status.txt"
+          grep -Fx "assessments enabled" "$RUNNER_TEMP/evidence/raw/spctl-status.txt"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH" \
+            2>&1 | tee "$RUNNER_TEMP/evidence/raw/codesign-verify.txt"
+          codesign --display --verbose=4 "$APP_PATH" \
+            2> "$RUNNER_TEMP/evidence/raw/codesign-details.txt"
+          grep -F "Authority=Developer ID Application:" "$RUNNER_TEMP/evidence/raw/codesign-details.txt"
+          grep -Fx "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/evidence/raw/codesign-details.txt"
+          grep -E 'flags=.*runtime' "$RUNNER_TEMP/evidence/raw/codesign-details.txt"
+          xcrun stapler validate "$APP_PATH" \
+            2>&1 | tee "$RUNNER_TEMP/evidence/raw/stapler-app.txt"
+          xcrun stapler validate "$RC_DMG" \
+            2>&1 | tee "$RUNNER_TEMP/evidence/raw/stapler-dmg.txt"
+          spctl --assess --type execute --verbose=4 "$APP_PATH" \
+            2>&1 | tee "$RUNNER_TEMP/evidence/raw/spctl-app.txt"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$RC_DMG" \
+            2>&1 | tee "$RUNNER_TEMP/evidence/raw/spctl-dmg.txt"
+
+      - name: Launch mounted app through LaunchServices with real GGUF and curl
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod 755 "$RUNNER_TEMP/clean-inputs/llama-server"
+          REAL_BINARY="$(node -p 'require("node:fs").realpathSync(process.argv[1])' "$RUNNER_TEMP/clean-inputs/llama-server")"
+          REAL_MODEL="$(node -p 'require("node:fs").realpathSync(process.argv[1])' "$RUNNER_TEMP/clean-inputs/model.gguf")"
+          export ILLAMA_EXTERNAL_CLIENT_REPORT="$RUNNER_TEMP/evidence/external-client-report.json"
+          export ILLAMA_EVIDENCE_HEAD_SHA="$TAGGED_SHA"
+          export ILLAMA_EVIDENCE_WORKFLOW_PATH=".github/workflows/release-acceptance.yml"
+          export ILLAMA_EVIDENCE_RUN_ID="$GITHUB_RUN_ID"
+          export ILLAMA_EVIDENCE_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT"
+          export ILLAMA_EVIDENCE_REPOSITORY="$GITHUB_REPOSITORY"
+          node scripts/native-tauri-acceptance.mjs \
+            --app "$MOUNTED_APP" \
+            --binary "$REAL_BINARY" \
+            --model "$REAL_MODEL" \
+            --report "$RUNNER_TEMP/evidence/native-report.json" \
+            --external-client "$GITHUB_WORKSPACE/scripts/external-client-curl.mjs" \
+            --launch-via-open
+
+          EXTERNAL_REPORT="$RUNNER_TEMP/evidence/external-client-report.json"
+          ENDPOINT="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).endpoint' "$EXTERNAL_REPORT")"
+          CURL_PATH="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).curl.path' "$EXTERNAL_REPORT")"
+          node scripts/validate-external-client-evidence.mjs \
+            --report "$EXTERNAL_REPORT" \
+            --endpoint "$ENDPOINT" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release-acceptance.yml" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            --verify-curl-executable
+          node scripts/create-clean-mac-report.mjs \
+            --output "$RUNNER_TEMP/evidence/clean-mac-report.json" \
+            --native-report "$RUNNER_TEMP/evidence/native-report.json" \
+            --external-report "$EXTERNAL_REPORT" \
+            --rc-provenance "$RC_PROVENANCE" \
+            --gatekeeper-status "$RUNNER_TEMP/evidence/raw/spctl-status.txt" \
+            --check "codesignDetails=$RUNNER_TEMP/evidence/raw/codesign-details.txt" \
+            --check "codesignVerify=$RUNNER_TEMP/evidence/raw/codesign-verify.txt" \
+            --check "hdiutilAttach=$RUNNER_TEMP/evidence/raw/hdiutil-attach.plist" \
+            --check "spctlApp=$RUNNER_TEMP/evidence/raw/spctl-app.txt" \
+            --check "spctlDmg=$RUNNER_TEMP/evidence/raw/spctl-dmg.txt" \
+            --check "staplerApp=$RUNNER_TEMP/evidence/raw/stapler-app.txt" \
+            --check "staplerDmg=$RUNNER_TEMP/evidence/raw/stapler-dmg.txt" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release-acceptance.yml" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY"
+          artifacts=(
+            --artifact "binary=$REAL_BINARY"
+            --artifact "model=$REAL_MODEL"
+            --artifact "curl=$CURL_PATH"
+            --artifact "externalReport=$EXTERNAL_REPORT"
+            --artifact "gatekeeperStatus=$RUNNER_TEMP/evidence/raw/spctl-status.txt"
+            --artifact "nativeReport=$RUNNER_TEMP/evidence/native-report.json"
+            --artifact "rcDmg=$RC_DMG"
+            --artifact "rcChecksum=$RC_CHECKSUM"
+            --artifact "rcProvenance=$RC_PROVENANCE"
+            --artifact "codesignDetails=$RUNNER_TEMP/evidence/raw/codesign-details.txt"
+            --artifact "codesignVerify=$RUNNER_TEMP/evidence/raw/codesign-verify.txt"
+            --artifact "hdiutilAttach=$RUNNER_TEMP/evidence/raw/hdiutil-attach.plist"
+            --artifact "staplerApp=$RUNNER_TEMP/evidence/raw/stapler-app.txt"
+            --artifact "staplerDmg=$RUNNER_TEMP/evidence/raw/stapler-dmg.txt"
+            --artifact "spctlApp=$RUNNER_TEMP/evidence/raw/spctl-app.txt"
+            --artifact "spctlDmg=$RUNNER_TEMP/evidence/raw/spctl-dmg.txt"
+          )
+          node scripts/create-release-evidence.mjs \
+            --output "$RUNNER_TEMP/evidence/evidence.json" \
+            --type clean-mac \
+            --report "$RUNNER_TEMP/evidence/clean-mac-report.json" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release-acceptance.yml" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            "${artifacts[@]}"
+          node scripts/validate-release-evidence.mjs \
+            --evidence "$RUNNER_TEMP/evidence/evidence.json" \
+            --type clean-mac \
+            --report "$RUNNER_TEMP/evidence/clean-mac-report.json" \
+            --head-sha "$TAGGED_SHA" \
+            --workflow-path ".github/workflows/release-acceptance.yml" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            "${artifacts[@]}"
+
+      - name: Detach the exact mounted device
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ATTACH_PLIST="$RUNNER_TEMP/evidence/raw/hdiutil-attach.plist"
+          DEVICE="${MOUNT_DEVICE:-}"
+          if [[ -z "$DEVICE" && -s "$ATTACH_PLIST" && -n "${MOUNT_POINT:-}" ]]; then
+            DEVICE="$(
+              plutil -convert json -o - "$ATTACH_PLIST" |
+                jq -r --arg mount "$MOUNT_POINT" \
+                  '."system-entities"[] | select(."mount-point" == $mount) | ."dev-entry"' |
+                head -n 1
+            )"
+          fi
+          if [[ "$DEVICE" == /dev/* ]]; then
+            hdiutil detach "$DEVICE"
+          fi
+          if [[ -n "${MOUNT_POINT:-}" && -d "$MOUNT_POINT" ]]; then
+            rmdir "$MOUNT_POINT"
+          fi
+
+      - name: Upload raw clean-Mac command outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: clean-mac-raw-${{ steps.target.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence/raw
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload exact clean-Mac evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-clean-mac-${{ steps.target.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 30

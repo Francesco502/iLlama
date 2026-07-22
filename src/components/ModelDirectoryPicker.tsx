@@ -7,6 +7,7 @@ interface ModelDirectoryPickerProps {
   onAddDirectory: () => void;
   onRemoveDirectory: (path: string) => void;
   onRefresh: () => void;
+  onRescanDirectory: (path: string) => void;
 }
 
 /** Shorten a path to the last 2-3 segments for display. */
@@ -22,6 +23,7 @@ export function ModelDirectoryPicker({
   onAddDirectory,
   onRemoveDirectory,
   onRefresh,
+  onRescanDirectory,
 }: ModelDirectoryPickerProps) {
   return (
     <section className="sidebar-section">
@@ -52,7 +54,28 @@ export function ModelDirectoryPicker({
         {directories.map((directory) => (
           <div className="directory-row" key={directory.path} title={directory.path}>
             <span className="status-dot" data-status={directory.status} />
-            <span>{shortenPath(directory.path)}</span>
+            <span className="directory-row-main">
+              <span className="directory-path">{shortenPath(directory.path)}</span>
+              {directory.status === "scanning" && directory.progress ? (
+                <span className="directory-detail">
+                  已扫描 {directory.progress.filesScanned}，发现 {directory.progress.modelsFound}
+                </span>
+              ) : null}
+              {directory.lastError ? (
+                <span className="directory-error">{directory.lastError}</span>
+              ) : null}
+            </span>
+            <button
+              className="directory-rescan-btn"
+              type="button"
+              aria-label={`重新扫描 ${directory.path}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRescanDirectory(directory.path);
+              }}
+            >
+              <RefreshCw size={10} />
+            </button>
             <button
               className="directory-remove-btn"
               type="button"

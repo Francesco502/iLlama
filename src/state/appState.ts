@@ -4,6 +4,7 @@ import type {
   ModelEntry,
   ParameterProfile,
   PrometheusHintsConfig,
+  SamplingParameters,
   StartupParameters,
 } from "../types/domain";
 import type { ParameterPresetSourceId } from "../lib/parameterPresets";
@@ -14,9 +15,12 @@ interface SettingsSnapshotInput {
   profileId: ParameterProfile["id"];
   parameterPresetSourceId: ParameterPresetSourceId;
   selectedModelPath: string | null;
+  autoPort: boolean;
   port: number;
   startupParameters: StartupParameters;
+  sampling: SamplingParameters;
   prometheusHints: PrometheusHintsConfig;
+  ui: AppSettings["ui"];
 }
 
 export function mergeScannedModels(
@@ -35,10 +39,31 @@ export function pickSelectedModelPath(
   models: ModelEntry[],
   preferredPath: string | null,
 ): string | null {
-  if (preferredPath && models.some((model) => model.path === preferredPath)) {
+  const selectableModels = models.filter(isSelectableModel);
+  if (preferredPath && selectableModels.some((model) => model.path === preferredPath)) {
     return preferredPath;
   }
-  return models[0]?.path ?? null;
+  return selectableModels[0]?.path ?? null;
+}
+
+function isSelectableModel(model: ModelEntry): boolean {
+  return model.available && model.metadataStatus !== "invalid";
+}
+
+export function getModelLaunchAssessment(model: ModelEntry | null): {
+  allowed: boolean;
+  error?: string;
+  warning?: string;
+} {
+  if (!model) return { allowed: false, error: "请先选择 GGUF 模型。" };
+  if (model.metadataStatus === "invalid") {
+    return { allowed: false, error: model.metadataError ?? "无效 GGUF 文件。" };
+  }
+  if (!model.available) return { allowed: false, error: "模型文件当前不可用。" };
+  if (model.metadataStatus === "limited") {
+    return { allowed: true, warning: model.metadataError ?? "模型元数据读取不完整。" };
+  }
+  return { allowed: true };
 }
 
 export function reconcileMmprojPathForModel(
@@ -61,24 +86,37 @@ export function buildSettingsSnapshot({
   profileId,
   parameterPresetSourceId,
   selectedModelPath,
+  autoPort,
   port,
   startupParameters,
+  sampling,
   prometheusHints,
+  ui,
 }: SettingsSnapshotInput): AppSettings {
   return {
-    schemaVersion: 2,
-    modelDirectories: directories
-      .filter((directory) => directory.status === "ready")
-      .map((directory) => directory.path),
+    schemaVersion: 3,
+    modelDirectories: directories.map((directory) => directory.path),
     llamaServerPath: binaryPath,
-    defaultPresetId: profileId,
-    parameterPresetSourceId,
-    lastSelectedModelPath: selectedModelPath,
-    autoPort: true,
-    defaultPort: port,
-    idleSleepSeconds: startupParameters.idleSleepSeconds,
-    prometheusHints,
+    launchDraft: {
+      profileId: profileId === "max-capability" ? "auto" : "custom",
+      parameterPresetSourceId,
+      selectedModelPath,
+      autoPort,
+      port,
+      parameters: startupParameters,
+      prometheusHints,
+    },
+    sampling,
+    ui,
   };
+}
+
+export async function resolveLaunchPort(
+  autoPort: boolean,
+  preferredPort: number,
+  findPort: (host: string, preferred: number) => Promise<number>,
+): Promise<number> {
+  return autoPort ? findPort("127.0.0.1", preferredPort) : preferredPort;
 }
 
 function isPathInsideDirectory(path: string, directoryPath: string): boolean {

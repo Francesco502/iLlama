@@ -8,22 +8,23 @@ import { ConnectionPanel } from "./components/ConnectionPanel";
 import { ModelDirectoryPicker } from "./components/ModelDirectoryPicker";
 import { ModelList } from "./components/ModelList";
 import { ParameterPanel } from "./components/ParameterPanel";
+import { RuntimeStatusCard } from "./components/RuntimeStatusCard";
 import { RuntimeSmokeChat } from "./components/RuntimeSmokeChat";
 import { SamplingPanel } from "./components/SamplingPanel";
+import { SettingsWarningBanner } from "./components/SettingsWarningBanner";
 import {
   isTauriRuntime,
   findAvailablePort,
   resolveLlamaServerPath,
   getTrayEnabled,
+  revealSettingsBackup,
   setTrayEnabled,
 } from "./api/tauri";
 import { exportLegacyChatHistory } from "./api/legacyChatExport";
 import {
-  buildCommandPreview,
   buildMaxCapabilitySampling,
   buildMaxCapabilityStartupParameters,
   getProfileById,
-  resolveModelContextLimit,
   validateLaunchConfig,
 } from "./lib/parameterSchema";
 import {
@@ -33,11 +34,23 @@ import {
   type ParameterPresetSourceId,
 } from "./lib/parameterPresets";
 import { buildRuntimeConnection } from "./lib/externalClients";
+import {
+  countServerDefaultParameters,
+  getLaunchDraftChanges,
+  mergeResolvedStartupParameters,
+} from "./lib/launchDraft";
 import { demoModelDirectories, demoModels } from "./state/appStore";
-import { buildSettingsSnapshot, reconcileMmprojPathForModel } from "./state/appState";
+import {
+  buildSettingsSnapshot,
+  getModelLaunchAssessment,
+  reconcileMmprojPathForModel,
+  resolveLaunchPort,
+} from "./state/appState";
 import { useAppBootstrap } from "./hooks/useAppBootstrap";
 import { useDebouncedSettingsPersist } from "./hooks/useDebouncedSettingsPersist";
 import { useLlamaProcess } from "./hooks/useLlamaProcess";
+import { useCommandPreview } from "./hooks/useCommandPreview";
+import { useExclusiveAsyncAction } from "./hooks/useExclusiveAsyncAction";
 import { useModelDirectoryScanning } from "./hooks/useModelDirectoryScanning";
 import { useAppLogs } from "./hooks/useAppLogs";
 import {
@@ -52,6 +65,8 @@ import {
   type ParameterProfile,
   type PrometheusHintsConfig,
 } from "./types/domain";
+import type { AppSettings } from "./api/tauri";
+import type { SettingsWarning } from "./api/tauri";
 
 const DEFAULT_PORT = 8080;
 
@@ -75,6 +90,7 @@ export function App() {
     runningInTauri ? null : demoModels[0]?.path ?? null,
   );
   const [binaryPath, setBinaryPath] = useState<string | null>(null);
+  const [autoPort, setAutoPort] = useState(true);
   const [port, setPort] = useState(DEFAULT_PORT);
   const [profileId, setProfileId] = useState<ParameterProfile["id"]>("max-capability");
   const [parameterPresetSourceId, setParameterPresetSourceId] = useState<ParameterPresetSourceId>(
@@ -85,12 +101,19 @@ export function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("run");
   const [modelSort, setModelSort] = useState<"name" | "size" | "date">("name");
   const [modelSearch, setModelSearch] = useState("");
-  const [trayEnabled, setTrayEnabledState] = useState(false);
+  const [uiSettings, setUiSettings] = useState<AppSettings["ui"]>({
+    showInMenuBar: false,
+    logPanelOpen: false,
+    logPanelHeight: 180,
+    advancedOpen: false,
+  });
+  const [settingsWarning, setSettingsWarning] = useState<SettingsWarning | null>(null);
 
   const hasBootstrappedRef = useRef(!runningInTauri);
 
   const profile = getProfileById(profileId);
   const selectedModel = models.find((model) => model.path === selectedModelPath) ?? null;
+  const modelLaunchAssessment = getModelLaunchAssessment(selectedModel);
   const [sampling, setSampling] = useState(profile.sampling);
   const appliedParameterPreset = useMemo(
     () => applyParameterPresetSource(parameterPresetSourceId, selectedModel, startupParameters, sampling),
@@ -108,29 +131,54 @@ export function App() {
 
   // --- Custom hooks ---
   const {
+    snapshot: runtimeSnapshot,
     runtimeStatus,
     runtimeMetrics,
+    canStop,
+    isStartPending,
     handleStart: startProcess,
     handleStop,
     stopHealthPoll,
+    commandError,
+    clearCommandError,
   } = useLlamaProcess({
     appendSystemLog,
     mergeLogs,
     onHealthy: () => setActiveTab("connect"),
   });
 
-  const commandPreview = useMemo(
-    () =>
-      buildCommandPreview({
+  const launchDraft = useMemo(
+    () => ({
+      binaryPath,
+      modelPath: selectedModel?.path ?? selectedModelPath,
+      host: "127.0.0.1" as const,
+      port,
+      parameters: startupParameters,
+      prometheusHints,
+      autoPort,
+    }),
+    [autoPort, binaryPath, port, prometheusHints, selectedModel?.path, selectedModelPath, startupParameters],
+  );
+  const launchDraftChanges = useMemo(
+    () => getLaunchDraftChanges(launchDraft, runtimeSnapshot.activeLaunch),
+    [launchDraft, runtimeSnapshot.activeLaunch],
+  );
+  const serverDefaultParameterCount = runtimeSnapshot.activeLaunch
+    ? countServerDefaultParameters(runtimeSnapshot.activeLaunch.parameters)
+    : 0;
+
+  const previewConfig = useMemo(
+    () => ({
         binaryPath,
         modelPath: selectedModel?.path ?? null,
-        host: "127.0.0.1",
+        host: "127.0.0.1" as const,
         port,
         parameters: startupParameters,
         prometheusHints,
       }),
     [binaryPath, port, prometheusHints, selectedModel?.path, startupParameters],
   );
+  const commandPreview = useCommandPreview(previewConfig, runningInTauri);
 
   const launchValidation = useMemo(
     () =>
@@ -153,12 +201,16 @@ export function App() {
         profileId,
         parameterPresetSourceId,
         selectedModelPath,
+        autoPort,
         port,
         startupParameters,
+        sampling,
         prometheusHints,
+        ui: uiSettings,
       }),
     [
       binaryPath,
+      autoPort,
       directories,
       port,
       parameterPresetSourceId,
@@ -166,6 +218,8 @@ export function App() {
       prometheusHints,
       selectedModelPath,
       startupParameters,
+      sampling,
+      uiSettings,
     ],
   );
 
@@ -181,16 +235,22 @@ export function App() {
     setStartupParameters,
   });
   const { handleRefresh } = modelScan;
+  const { pending: isLaunchTransactionPending, run: runLaunchTransaction } =
+    useExclusiveAsyncAction();
 
   useAppBootstrap({
     runningInTauri,
     appendSystemLog,
+    onWarning: setSettingsWarning,
     hasBootstrappedRef,
     setBinaryPath,
+    setAutoPort,
     setPort,
     setProfileId,
     setParameterPresetSourceId,
     setStartupParameters,
+    setSampling,
+    setUiSettings,
     setDirectories,
     setModels,
     setSelectedModelPath,
@@ -204,7 +264,9 @@ export function App() {
   useEffect(() => {
     if (!runningInTauri) return;
     getTrayEnabled()
-      .then(setTrayEnabledState)
+      .then((enabled) =>
+        setUiSettings((current) => ({ ...current, showInMenuBar: enabled })),
+      )
       .catch(() => {/* ignore — tray API might not be available in dev */});
   }, [runningInTauri]);
 
@@ -230,39 +292,12 @@ export function App() {
   const runtimeConnection = useMemo(
     () =>
       buildRuntimeConnection({
-        port,
-        modelName: selectedModel?.fileName ?? null,
-        healthy: runtimeStatus === "healthy",
+        snapshot: runtimeSnapshot,
+        draftPort: port,
+        draftModelName: selectedModel?.fileName ?? null,
       }),
-    [port, runtimeStatus, selectedModel?.fileName],
+    [port, runtimeSnapshot, selectedModel?.fileName],
   );
-
-  useEffect(() => {
-    setStartupParameters((current) => {
-      const base =
-        profileId === "max-capability"
-          ? buildMaxCapabilityStartupParameters(selectedModel?.contextLength ?? null, current)
-          : current;
-      return applyParameterPresetSource(parameterPresetSourceId, selectedModel, base, getProfileById("custom").sampling)
-        .parameters;
-    });
-    setSampling((current) => {
-      const base =
-        profileId === "max-capability"
-          ? buildMaxCapabilitySampling(resolveModelContextLimit(selectedModel?.contextLength ?? null), current)
-          : current;
-      return applyParameterPresetSource(
-        parameterPresetSourceId,
-        selectedModel,
-        getProfileById("custom").parameters,
-        base,
-      ).sampling;
-    });
-  }, [
-    parameterPresetSourceId,
-    profileId,
-    selectedModel,
-  ]);
 
   useEffect(() => {
     return () => {
@@ -324,10 +359,28 @@ export function App() {
     appendSystemLog(`已选择 mmproj：${selected}`);
   }
 
-  async function handleStart() {
+  async function handleSettingsWarningRecovery(action: string, target: string) {
+    if (action !== "open-settings-backup") return;
+    try {
+      await revealSettingsBackup(target);
+    } catch (error) {
+      appendSystemLog(
+        `无法显示设置备份：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  async function performStart() {
     if (!selectedModel) {
       appendSystemLog("请先选择 GGUF 模型。");
       return;
+    }
+    if (!modelLaunchAssessment.allowed) {
+      appendSystemLog(modelLaunchAssessment.error ?? "该模型无法启动。");
+      return;
+    }
+    if (modelLaunchAssessment.warning) {
+      appendSystemLog(`模型元数据警告：${modelLaunchAssessment.warning}`);
     }
 
     if (!runningInTauri) {
@@ -368,8 +421,8 @@ export function App() {
 
     let launchPort: number;
     try {
-      launchPort = await findAvailablePort("127.0.0.1", port);
-      if (launchPort !== port) {
+      launchPort = await resolveLaunchPort(autoPort, port, findAvailablePort);
+      if (autoPort && launchPort !== port) {
         setPort(launchPort);
         appendSystemLog(`端口 ${port} 已占用，自动改用 ${launchPort}。`);
       }
@@ -396,14 +449,72 @@ export function App() {
     await startProcess(launchConfig);
   }
 
+  async function handleStart() {
+    await runLaunchTransaction(performStart);
+  }
+
+  async function handleRecoveryAction(action: string) {
+    switch (action) {
+      case "changePort": {
+        try {
+          const next = await findAvailablePort("127.0.0.1", Math.min(65535, port + 1));
+          setPort(next);
+          appendSystemLog(`已切换到可用端口 ${next}。`);
+          clearCommandError();
+        } catch (error) {
+          appendSystemLog(error instanceof Error ? error.message : String(error));
+        }
+        break;
+      }
+      case "selectBinary":
+        await handleSelectBinary();
+        clearCommandError();
+        break;
+      case "selectModel":
+        setActiveTab("run");
+        window.requestAnimationFrame(() =>
+          document.querySelector<HTMLElement>("[role='listbox'] [role='option']:not(:disabled)")?.focus(),
+        );
+        break;
+      case "retryStop":
+        await handleStop();
+        break;
+      default:
+        setUiSettings((current) => ({ ...current, logPanelOpen: true }));
+        break;
+    }
+  }
+
+  function restoreActiveLaunchToDraft() {
+    const active = runtimeSnapshot.activeLaunch;
+    if (!active) return;
+    setBinaryPath(active.binaryPath);
+    setSelectedModelPath(active.modelPath);
+    setPort(active.port);
+    setAutoPort(false);
+    setStartupParameters((current) => mergeResolvedStartupParameters(current, active.parameters));
+    setPrometheusHints(active.prometheusHints);
+    appendSystemLog("已将草稿恢复为当前运行配置；自动端口已关闭以保留实际端口。");
+  }
+
   function handleSelectModel(path: string) {
     const nextModel = models.find((model) => model.path === path) ?? null;
+    if (!getModelLaunchAssessment(nextModel).allowed) return;
     setSelectedModelPath(path);
-    setStartupParameters((current) => {
-      const mmprojPath = reconcileMmprojPathForModel(current.mmprojPath, nextModel);
-      if (mmprojPath === current.mmprojPath) return current;
-      return { ...current, mmprojPath };
-    });
+    const profileAdjusted = profileId === "max-capability"
+      ? buildMaxCapabilityStartupParameters(nextModel?.contextLength ?? null, startupParameters)
+      : startupParameters;
+    const mmprojPath = reconcileMmprojPathForModel(profileAdjusted.mmprojPath, nextModel);
+    const adjusted = applyParameterPresetSource(
+      parameterPresetSourceId,
+      nextModel,
+      { ...profileAdjusted, mmprojPath },
+      profileId === "max-capability"
+        ? buildMaxCapabilitySampling(profileAdjusted.ctxSize, sampling)
+        : sampling,
+    );
+    setStartupParameters(adjusted.parameters);
+    setSampling(adjusted.sampling);
   }
 
   async function handleExportLegacyHistory() {
@@ -426,7 +537,7 @@ export function App() {
         <div className="title-block">
           <Cpu size={16} />
           <h1>iLlama</h1>
-          <span className="version-badge">v3.1.0</span>
+          <span className="version-badge">v{__APP_VERSION__}</span>
         </div>
         <div className="topbar-actions">
           <button className="ghost-button" type="button" onClick={handleSelectBinary}>
@@ -435,16 +546,21 @@ export function App() {
           </button>
           <button
             className="start-button"
+            data-native-acceptance-target="start"
             type="button"
-            disabled={runtimeStatus === "starting" || runtimeStatus === "healthy"}
+            disabled={
+              canStop || isStartPending || isLaunchTransactionPending || !modelLaunchAssessment.allowed
+            }
             onClick={handleStart}
           >
-            {runtimeStatus === "starting" ? (
+            {runtimeStatus === "starting" || isStartPending || isLaunchTransactionPending ? (
               <Loader2 size={13} className="spin" />
             ) : (
               <Play size={13} />
             )}
-            {runtimeStatus === "starting" ? "启动中..." : "启动"}
+            {runtimeStatus === "starting" || isStartPending || isLaunchTransactionPending
+              ? "启动中..."
+              : "启动"}
           </button>
         </div>
       </header>
@@ -460,6 +576,7 @@ export function App() {
               onAddDirectory={modelScan.handleAddDirectory}
               onRemoveDirectory={modelScan.handleRemoveDirectory}
               onRefresh={handleRefresh}
+              onRescanDirectory={modelScan.scanDirectory}
             />
             <ModelList
               models={sortedModels}
@@ -474,6 +591,60 @@ export function App() {
         }
         runContent={
           <div className="config-view">
+            {settingsWarning && (
+              <SettingsWarningBanner
+                warning={settingsWarning}
+                onRecovery={(action, target) =>
+                  void handleSettingsWarningRecovery(action, target)
+                }
+                onOpenLogs={() =>
+                  setUiSettings((current) => ({ ...current, logPanelOpen: true }))
+                }
+                onDismiss={() => setSettingsWarning(null)}
+              />
+            )}
+            {commandError && (
+              <section className="settings-warning-banner panel" role="alert">
+                <div>
+                  <strong>操作未完成</strong>
+                  <p>{commandError.message}</p>
+                </div>
+                <div className="settings-warning-actions">
+                  <button
+                    className="ghost-button"
+                    data-native-acceptance-target={commandError.recoveryAction === "changePort" ? "change-port" : undefined}
+                    type="button"
+                    onClick={() => void handleRecoveryAction(commandError.recoveryAction)}
+                  >
+                    {recoveryActionLabel(commandError.recoveryAction)}
+                  </button>
+                  <button className="ghost-button" type="button" onClick={clearCommandError}>关闭</button>
+                </div>
+              </section>
+            )}
+            <RuntimeStatusCard
+              snapshot={runtimeSnapshot}
+              onStop={handleStop}
+              onOpenLogs={() =>
+                setUiSettings((current) => ({ ...current, logPanelOpen: true }))
+              }
+            />
+            {runtimeSnapshot.activeLaunch && serverDefaultParameterCount > 0 && (
+              <p className="runtime-server-defaults" role="status">
+                当前服务有 {serverDefaultParameterCount} 项参数由 llama-server 使用默认值；实际值未声明。
+              </p>
+            )}
+            {runtimeSnapshot.activeLaunch && launchDraftChanges.length > 0 && (
+              <section className="runtime-draft-notice panel" aria-label="下次启动配置变更">
+                <div>
+                  <strong>当前草稿有 {launchDraftChanges.length} 项变更</strong>
+                  <p>这些变更只会在下次启动时生效；当前服务仍使用实际运行配置。</p>
+                </div>
+                <button className="ghost-button" type="button" onClick={restoreActiveLaunchToDraft}>
+                  恢复为当前运行配置
+                </button>
+              </section>
+            )}
             <section className="model-summary panel">
               <div>
                 <span className="eyebrow">已选择模型</span>
@@ -516,6 +687,8 @@ export function App() {
               modelContextLength={selectedModel?.contextLength ?? null}
               port={port}
               onPortChange={setPort}
+              autoPort={autoPort}
+              onAutoPortChange={setAutoPort}
               mmprojCandidates={selectedModel?.mmprojCandidates ?? []}
               onSelectMmproj={handleSelectMmproj}
               validation={launchValidation}
@@ -549,28 +722,43 @@ export function App() {
                   setSampling(adjusted.sampling);
                 }
               }}
+              serverCapabilities={commandPreview.capabilities}
             />
             <SamplingPanel
               parameterMode={profileId}
               sampling={sampling}
               ctxSize={startupParameters.ctxSize}
               onSamplingChange={setSampling}
+              advancedOpen={uiSettings.advancedOpen}
+              onAdvancedOpenChange={(advancedOpen) =>
+                setUiSettings((current) => ({ ...current, advancedOpen }))
+              }
             />
-            <CommandPreview args={commandPreview} />
+            <CommandPreview args={commandPreview.args} warnings={commandPreview.warnings} />
           </div>
         }
         connectionContent={
           <ConnectionPanel
             connection={runtimeConnection}
             runningInTauri={runningInTauri}
-            trayEnabled={trayEnabled}
+            trayEnabled={uiSettings.showInMenuBar}
             onTrayToggle={(enabled) => {
-              setTrayEnabledState(enabled);
-              if (runningInTauri) {
-                setTrayEnabled(enabled).catch((err) =>
-                  appendSystemLog(`状态栏图标设置失败：${err instanceof Error ? err.message : String(err)}`),
-                );
+              if (!runningInTauri) {
+                setUiSettings((current) => ({ ...current, showInMenuBar: enabled }));
+                return;
               }
+              void setTrayEnabled(enabled)
+                .then((actual) => {
+                  setUiSettings((current) => ({ ...current, showInMenuBar: actual }));
+                })
+                .catch((err) => {
+                  appendSystemLog(
+                    `状态栏图标设置失败：${err instanceof Error ? err.message : String(err)}`,
+                  );
+                  void getTrayEnabled().then((actual) => {
+                    setUiSettings((current) => ({ ...current, showInMenuBar: actual }));
+                  });
+                });
             }}
             onOpenTest={() => setActiveTab("test")}
             onExportLegacyHistory={() => void handleExportLegacyHistory()}
@@ -579,9 +767,7 @@ export function App() {
         }
         testContent={
           <RuntimeSmokeChat
-            runtimeStatus={runtimeStatus}
-            selectedModel={selectedModel}
-            port={port}
+            snapshot={runtimeSnapshot}
             sampling={sampling}
             appendSystemLog={appendSystemLog}
             onNavigateToRun={() => setActiveTab("run")}
@@ -590,9 +776,28 @@ export function App() {
         logs={logs}
         runtimeStatus={runtimeStatus}
         runtimeMetrics={runtimeMetrics}
+        canStop={canStop}
         onStop={handleStop}
         onClearLogs={clearLogs}
+        logOpen={uiSettings.logPanelOpen}
+        logHeight={uiSettings.logPanelHeight}
+        onLogOpenChange={(logPanelOpen) =>
+          setUiSettings((current) => ({ ...current, logPanelOpen }))
+        }
+        onLogHeightChange={(logPanelHeight) =>
+          setUiSettings((current) => ({ ...current, logPanelHeight }))
+        }
       />
     </div>
   );
+}
+
+function recoveryActionLabel(action: string): string {
+  switch (action) {
+    case "changePort": return "更换端口";
+    case "selectBinary": return "选择 llama-server";
+    case "selectModel": return "选择模型";
+    case "retryStop": return "重试停止";
+    default: return "查看日志";
+  }
 }

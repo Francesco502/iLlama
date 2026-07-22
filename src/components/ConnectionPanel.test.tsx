@@ -1,7 +1,15 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { buildRuntimeConnection } from "../lib/externalClients";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { buildRuntimeConnection, checkRuntimeConnection } from "../lib/externalClients";
 import { ConnectionPanel } from "./ConnectionPanel";
+
+vi.mock("../lib/externalClients", async () => {
+  const actual = await vi.importActual<typeof import("../lib/externalClients")>(
+    "../lib/externalClients",
+  );
+  return { ...actual, checkRuntimeConnection: vi.fn() };
+});
 
 describe("ConnectionPanel", () => {
   it("shows OpenAI-compatible connection fields for external clients", () => {
@@ -70,5 +78,39 @@ describe("ConnectionPanel", () => {
 
     expect(screen.getByText("浏览器预览模式")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出 V2 历史" })).toBeInTheDocument();
+  });
+
+  it("clears a completed check when health or model identity changes on the same port", async () => {
+    vi.mocked(checkRuntimeConnection).mockResolvedValue({
+      ok: true,
+      healthOk: true,
+      modelsOk: true,
+      models: ["model-a"],
+      message: "连接可用，发现 1 个模型。",
+    });
+    const user = userEvent.setup();
+    const commonProps = {
+      onOpenTest: () => undefined,
+      trayEnabled: false,
+      onTrayToggle: () => undefined,
+      appendSystemLog: () => undefined,
+    };
+    const { rerender } = render(
+      <ConnectionPanel
+        {...commonProps}
+        connection={buildRuntimeConnection({ port: 8080, modelName: "model-a", healthy: true })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "检测连接" }));
+    expect(await screen.findByText("检测通过")).toBeInTheDocument();
+
+    rerender(
+      <ConnectionPanel
+        {...commonProps}
+        connection={buildRuntimeConnection({ port: 8080, modelName: "model-b", healthy: false })}
+      />,
+    );
+
+    expect(screen.queryByText("检测通过")).not.toBeInTheDocument();
   });
 });

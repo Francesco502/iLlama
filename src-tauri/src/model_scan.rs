@@ -1,4 +1,4 @@
-use crate::gguf::read_gguf_metadata;
+use crate::gguf::{inspect_gguf, GgufStatus};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -29,15 +29,52 @@ pub struct ModelEntry {
 #[serde(rename_all = "camelCase")]
 pub enum MetadataStatus {
     Ready,
-    Unreadable,
-    Pending,
+    Limited,
+    Invalid,
 }
 
 pub fn scan_model_directory(path: &Path) -> io::Result<Vec<ModelEntry>> {
+    scan_model_directory_with_progress(path, String::new(), |_| {}).map(|result| result.models)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelScanResult {
+    pub request_id: String,
+    pub directory: String,
+    pub models: Vec<ModelEntry>,
+    /// Regular files visited by the directory walker, including non-GGUF and mmproj files.
+    pub files_scanned: u64,
+    /// Available non-mmproj GGUF models. Invalid candidates are not counted as found models.
+    pub models_found: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelScanProgress {
+    pub request_id: String,
+    pub directory: String,
+    pub files_scanned: u64,
+    pub models_found: u64,
+}
+
+pub fn scan_model_directory_with_progress(
+    path: &Path,
+    request_id: String,
+    mut on_progress: impl FnMut(&ModelScanProgress),
+) -> io::Result<ModelScanResult> {
+    let directory = path.to_string_lossy().to_string();
     let root = fs::canonicalize(path)?;
     let mut model_paths = Vec::new();
     let mut mmproj_paths = Vec::new();
     let mut models = Vec::new();
+    let mut progress = ModelScanProgress {
+        request_id: request_id.clone(),
+        directory: directory.clone(),
+        files_scanned: 0,
+        models_found: 0,
+    };
+    on_progress(&progress);
 
     for entry in WalkDir::new(&root)
         .follow_links(false)
@@ -45,7 +82,12 @@ pub fn scan_model_directory(path: &Path) -> io::Result<Vec<ModelEntry>> {
         .filter_entry(|entry| !is_hidden_dir(entry))
     {
         let entry = entry?;
-        if !entry.file_type().is_file() || !is_gguf(entry.path()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        progress.files_scanned = progress.files_scanned.saturating_add(1);
+        on_progress(&progress);
+        if !is_gguf(entry.path()) {
             continue;
         }
 
@@ -59,7 +101,12 @@ pub fn scan_model_directory(path: &Path) -> io::Result<Vec<ModelEntry>> {
     for path in model_paths {
         let candidates = mmproj_candidates_for_model(&path, &mmproj_paths);
         match read_model_entry(&root, &path, candidates.clone()) {
-            Ok(entry) => models.push(entry),
+            Ok(entry) => {
+                if entry.available {
+                    progress.models_found = progress.models_found.saturating_add(1);
+                }
+                models.push(entry);
+            }
             Err(error) => {
                 let file_name = path
                     .file_name()
@@ -82,17 +129,24 @@ pub fn scan_model_directory(path: &Path) -> io::Result<Vec<ModelEntry>> {
                     quantization: None,
                     context_length: None,
                     parameter_count: None,
-                    metadata_status: MetadataStatus::Unreadable,
+                    metadata_status: MetadataStatus::Invalid,
                     metadata_error: Some(error.to_string()),
                     available: false,
                     mmproj_candidates: candidates,
                 });
             }
         }
+        on_progress(&progress);
     }
 
     models.sort_by(|left, right| left.file_name.cmp(&right.file_name));
-    Ok(models)
+    Ok(ModelScanResult {
+        request_id,
+        directory,
+        models,
+        files_scanned: progress.files_scanned,
+        models_found: progress.models_found,
+    })
 }
 
 fn read_model_entry(
@@ -107,11 +161,14 @@ fn read_model_entry(
         .unwrap_or_else(|_| Utc::now())
         .to_rfc3339();
 
-    let gguf = read_gguf_metadata(path);
-    let (metadata_status, metadata_error, gguf_metadata) = match gguf {
-        Ok(metadata) => (MetadataStatus::Ready, None, Some(metadata)),
-        Err(error) => (MetadataStatus::Unreadable, Some(error.to_string()), None),
+    let inspection = inspect_gguf(path);
+    let (metadata_status, available) = match inspection.status {
+        GgufStatus::Ready => (MetadataStatus::Ready, true),
+        GgufStatus::Limited => (MetadataStatus::Limited, true),
+        GgufStatus::Invalid => (MetadataStatus::Invalid, false),
     };
+    let metadata_error = inspection.warning;
+    let gguf_metadata = inspection.metadata;
 
     Ok(ModelEntry {
         path: path.to_string_lossy().to_string(),
@@ -135,7 +192,7 @@ fn read_model_entry(
         parameter_count: gguf_metadata.and_then(|metadata| metadata.parameter_count),
         metadata_status,
         metadata_error,
-        available: true,
+        available,
         mmproj_candidates,
     })
 }

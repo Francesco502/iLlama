@@ -16,7 +16,7 @@ export const demoModels: ModelEntry[] = [
     contextLength: 4096,
     parameterCount: "7B",
     metadataStatus: "ready",
-    available: false,
+    available: true,
     mmprojCandidates: [],
   },
   {
@@ -30,7 +30,7 @@ export const demoModels: ModelEntry[] = [
     contextLength: 8192,
     parameterCount: "13B",
     metadataStatus: "ready",
-    available: false,
+    available: true,
     mmprojCandidates: [],
   },
 ];

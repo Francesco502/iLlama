@@ -1,5 +1,6 @@
 import type { ChatAttachment, ChatMessage } from "../types/chat";
 import type { SamplingParameters } from "../types/domain";
+import { buildLoopbackHttpUrl } from "./loopbackUrl";
 
 export interface ChatRequestMessage {
   role: ChatMessage["role"];
@@ -8,6 +9,7 @@ export interface ChatRequestMessage {
 }
 
 interface ChatCompletionBodyOptions {
+  modelId: string;
   messages: ChatRequestMessage[];
   sampling: SamplingParameters;
 }
@@ -44,6 +46,7 @@ export interface RuntimeCapabilities {
 interface ChatCompletionOptions {
   host: string;
   port: number;
+  modelId: string;
   messages: ChatRequestMessage[];
   sampling: SamplingParameters;
   signal?: AbortSignal;
@@ -54,9 +57,22 @@ interface StreamChatOptions extends ChatCompletionOptions {
   onDelta?: (delta: ChatStreamDelta) => void;
 }
 
-export async function streamChatCompletion({
+const CHAT_REQUEST_TIMEOUT_MS = 120_000;
+const MODELS_REQUEST_TIMEOUT_MS = 5_000;
+
+export async function streamChatCompletion(options: StreamChatOptions): Promise<void> {
+  const timed = createTimedSignal(options.signal, CHAT_REQUEST_TIMEOUT_MS, "聊天请求超过 120 秒未完成。");
+  try {
+    await streamChatCompletionRequest({ ...options, signal: timed.signal });
+  } finally {
+    timed.dispose();
+  }
+}
+
+async function streamChatCompletionRequest({
   host,
   port,
+  modelId,
   messages,
   sampling,
   signal,
@@ -65,12 +81,12 @@ export async function streamChatCompletion({
 }: StreamChatOptions): Promise<void> {
   await assertImageInputSupported({ host, port, messages, signal });
 
-  const response = await fetch(`http://${host}:${port}/v1/chat/completions`, {
+  const response = await fetch(buildLoopbackHttpUrl(host, port, "/v1/chat/completions"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(buildChatCompletionBody({ messages, sampling, stream: true })),
+    body: JSON.stringify(buildChatCompletionBody({ modelId, messages, sampling, stream: true })),
     signal,
   });
 
@@ -119,21 +135,33 @@ export async function streamChatCompletion({
   }
 }
 
-export async function completeChatCompletion({
+export async function completeChatCompletion(
+  options: ChatCompletionOptions,
+): Promise<ChatCompletionMessage> {
+  const timed = createTimedSignal(options.signal, CHAT_REQUEST_TIMEOUT_MS, "聊天请求超过 120 秒未完成。");
+  try {
+    return await completeChatCompletionRequest({ ...options, signal: timed.signal });
+  } finally {
+    timed.dispose();
+  }
+}
+
+async function completeChatCompletionRequest({
   host,
   port,
+  modelId,
   messages,
   sampling,
   signal,
 }: ChatCompletionOptions): Promise<ChatCompletionMessage> {
   await assertImageInputSupported({ host, port, messages, signal });
 
-  const response = await fetch(`http://${host}:${port}/v1/chat/completions`, {
+  const response = await fetch(buildLoopbackHttpUrl(host, port, "/v1/chat/completions"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(buildChatCompletionBody({ messages, sampling, stream: false })),
+    body: JSON.stringify(buildChatCompletionBody({ modelId, messages, sampling, stream: false })),
     signal,
   });
 
@@ -145,12 +173,13 @@ export async function completeChatCompletion({
 }
 
 export function buildChatCompletionBody({
+  modelId,
   messages,
   sampling,
   stream = false,
 }: ChatCompletionBodyOptions & { stream?: boolean }) {
   return {
-    model: "local",
+    model: modelId,
     stream,
     messages: messages.map((message) => ({
       role: message.role,
@@ -198,8 +227,11 @@ async function fetchRuntimeCapabilities(
   port: number,
   signal?: AbortSignal,
 ): Promise<RuntimeCapabilities> {
+  const timed = createTimedSignal(signal, MODELS_REQUEST_TIMEOUT_MS, "模型能力检测超过 5 秒未完成。");
   try {
-    const response = await fetch(`http://${host}:${port}/v1/models`, { signal });
+    const response = await fetch(buildLoopbackHttpUrl(host, port, "/v1/models"), {
+      signal: timed.signal,
+    });
     if (!response.ok) {
       return { multimodal: null };
     }
@@ -209,7 +241,34 @@ async function fetchRuntimeCapabilities(
       throw error;
     }
     return { multimodal: null };
+  } finally {
+    timed.dispose();
   }
+}
+
+function createTimedSignal(
+  parent: AbortSignal | undefined,
+  timeoutMs: number,
+  message: string,
+): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parent?.reason);
+  if (parent?.aborted) {
+    abortFromParent();
+  } else {
+    parent?.addEventListener("abort", abortFromParent, { once: true });
+  }
+  const timer = setTimeout(
+    () => controller.abort(new DOMException(message, "TimeoutError")),
+    timeoutMs,
+  );
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", abortFromParent);
+    },
+  };
 }
 
 export function parseRuntimeCapabilities(payload: unknown): RuntimeCapabilities {

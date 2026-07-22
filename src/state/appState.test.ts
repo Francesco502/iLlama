@@ -1,14 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getProfileById } from "../lib/parameterSchema";
 import type { ModelDirectory, ModelEntry } from "../types/domain";
 import { emptyPrometheusHintsConfig } from "../types/domain";
 import {
   buildSettingsSnapshot,
+  getModelLaunchAssessment,
   mergeScannedModels,
   pickSelectedModelPath,
   reconcileMmprojPathForModel,
   removeDirectoryModels,
 } from "./appState";
+import * as appState from "./appState";
 
 const baseModel: ModelEntry = {
   path: "/models/a/model-a.gguf",
@@ -52,6 +54,47 @@ describe("app state helpers", () => {
     expect(pickSelectedModelPath(models, "/missing.gguf")).toBe("/models/a/model-a.gguf");
   });
 
+  it("never restores or automatically selects an invalid model", () => {
+    const invalid = {
+      ...baseModel,
+      metadataStatus: "invalid" as const,
+      available: false,
+      metadataError: "invalid GGUF magic",
+    };
+    const limited = {
+      ...baseModel,
+      path: "/models/a/limited.gguf",
+      metadataStatus: "limited" as const,
+      metadataError: "metadata truncated",
+    };
+
+    expect(pickSelectedModelPath([invalid, limited], invalid.path)).toBe(limited.path);
+    expect(pickSelectedModelPath([invalid], invalid.path)).toBeNull();
+  });
+
+  it("blocks invalid model launches but allows limited models with a warning", () => {
+    const invalid = {
+      ...baseModel,
+      metadataStatus: "invalid" as const,
+      available: false,
+      metadataError: "invalid GGUF magic",
+    };
+    const limited = {
+      ...baseModel,
+      metadataStatus: "limited" as const,
+      metadataError: "metadata truncated",
+    };
+
+    expect(getModelLaunchAssessment(invalid)).toEqual({
+      allowed: false,
+      error: "invalid GGUF magic",
+    });
+    expect(getModelLaunchAssessment(limited)).toEqual({
+      allowed: true,
+      warning: "metadata truncated",
+    });
+  });
+
   it("auto-selects the only mmproj candidate for a newly selected model", () => {
     const model = {
       ...baseModel,
@@ -89,18 +132,46 @@ describe("app state helpers", () => {
       profileId: "custom",
       parameterPresetSourceId: "user:precise",
       selectedModelPath: "/models/a/model-a.gguf",
+      autoPort: false,
       port: 9090,
       startupParameters: parameters,
+      sampling: { ...getProfileById("custom").sampling, maxTokens: 512 },
       prometheusHints: emptyPrometheusHintsConfig(),
+      ui: {
+        showInMenuBar: true,
+        logPanelOpen: true,
+        logPanelHeight: 240,
+        advancedOpen: false,
+      },
     });
 
     expect(snapshot).toMatchObject({
-      schemaVersion: 2,
-      modelDirectories: ["/models/a"],
+      schemaVersion: 3,
+      modelDirectories: ["/models/a", "/models/b"],
       llamaServerPath: "/bin/llama-server",
-      parameterPresetSourceId: "user:precise",
-      defaultPort: 9090,
-      idleSleepSeconds: 30,
+      launchDraft: {
+        profileId: "custom",
+        parameterPresetSourceId: "user:precise",
+        autoPort: false,
+        port: 9090,
+        parameters: {
+          batchSize: 2048,
+          idleSleepSeconds: 30,
+        },
+      },
+      sampling: { maxTokens: 512 },
+      ui: { showInMenuBar: true, logPanelOpen: true, logPanelHeight: 240 },
     });
+  });
+
+  it("does not search for a replacement when automatic ports are disabled", async () => {
+    expect(appState.resolveLaunchPort).toBeTypeOf("function");
+    const findPort = vi.fn().mockResolvedValue(9091);
+
+    await expect(appState.resolveLaunchPort(false, 9090, findPort)).resolves.toBe(9090);
+    expect(findPort).not.toHaveBeenCalled();
+
+    await expect(appState.resolveLaunchPort(true, 9090, findPort)).resolves.toBe(9091);
+    expect(findPort).toHaveBeenCalledWith("127.0.0.1", 9090);
   });
 });

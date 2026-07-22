@@ -5,6 +5,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -23,8 +24,13 @@ interface AppLayoutProps {
   logs: LogEntry[];
   runtimeStatus: RuntimeStatus;
   runtimeMetrics: RuntimeMetrics;
+  canStop: boolean;
   onStop: () => void;
   onClearLogs?: () => void;
+  logOpen: boolean;
+  logHeight: number;
+  onLogOpenChange: (open: boolean) => void;
+  onLogHeightChange: (height: number) => void;
 }
 
 const statusLabel: Record<RuntimeStatus, string> = {
@@ -37,9 +43,8 @@ const statusLabel: Record<RuntimeStatus, string> = {
   stopped: "已停止",
 };
 
-const DEFAULT_LOG_DRAWER_HEIGHT = 180;
 const MIN_LOG_DRAWER_HEIGHT = 96;
-const MAX_LOG_DRAWER_HEIGHT = 480;
+const MAX_LOG_DRAWER_HEIGHT = 360;
 const LOG_DRAWER_KEYBOARD_STEP = 24;
 
 function clampLogDrawerHeight(height: number): number {
@@ -56,17 +61,48 @@ export function AppLayout({
   logs,
   runtimeStatus,
   runtimeMetrics,
+  canStop,
   onStop,
   onClearLogs,
+  logOpen,
+  logHeight,
+  onLogOpenChange,
+  onLogHeightChange,
 }: AppLayoutProps) {
-  const [logOpen, setLogOpen] = useState(false);
-  const [logHeight, setLogHeight] = useState(DEFAULT_LOG_DRAWER_HEIGHT);
   const [logFilter, setLogFilter] = useState<"all" | "stdout" | "stderr" | "system">("all");
   const [logQuery, setLogQuery] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
   const logResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
-  const canStop = runtimeStatus === "starting" || runtimeStatus === "healthy";
+  const tabPanelRef = useRef<HTMLDivElement>(null);
+  const previousTabRef = useRef(activeTab);
+  const tabScrollPositionsRef = useRef<Record<AppTab, number>>({ run: 0, connect: 0, test: 0 });
+  const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
+  const shortcutsCloseRef = useRef<HTMLButtonElement>(null);
+  const shortcutsReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  const openShortcuts = useCallback(() => {
+    shortcutsReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : shortcutsTriggerRef.current;
+    setShortcutsOpen(true);
+  }, []);
+
+  const closeShortcuts = useCallback(() => {
+    setShortcutsOpen(false);
+    (shortcutsReturnFocusRef.current ?? shortcutsTriggerRef.current)?.focus();
+  }, []);
+
+  const selectTab = useCallback(
+    (tab: AppTab) => {
+      if (tab === activeTab) return;
+      const panel = tabPanelRef.current;
+      if (panel) tabScrollPositionsRef.current[activeTab] = panel.scrollTop;
+      onTabChange(tab);
+    },
+    [activeTab, onTabChange],
+  );
 
   const stopLogResize = useCallback(() => {
     logResizeRef.current = null;
@@ -78,8 +114,10 @@ export function AppLayout({
     if (!resizeState) {
       return;
     }
-    setLogHeight(clampLogDrawerHeight(resizeState.startHeight + resizeState.startY - event.clientY));
-  }, []);
+    onLogHeightChange(
+      clampLogDrawerHeight(resizeState.startHeight + resizeState.startY - event.clientY),
+    );
+  }, [onLogHeightChange]);
 
   const handleLogResizeEnd = useCallback(() => {
     stopLogResize();
@@ -104,22 +142,22 @@ export function AppLayout({
   function handleLogResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setLogHeight((height) => clampLogDrawerHeight(height + LOG_DRAWER_KEYBOARD_STEP));
+      onLogHeightChange(clampLogDrawerHeight(logHeight + LOG_DRAWER_KEYBOARD_STEP));
       return;
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setLogHeight((height) => clampLogDrawerHeight(height - LOG_DRAWER_KEYBOARD_STEP));
+      onLogHeightChange(clampLogDrawerHeight(logHeight - LOG_DRAWER_KEYBOARD_STEP));
       return;
     }
     if (event.key === "Home") {
       event.preventDefault();
-      setLogHeight(MIN_LOG_DRAWER_HEIGHT);
+      onLogHeightChange(MIN_LOG_DRAWER_HEIGHT);
       return;
     }
     if (event.key === "End") {
       event.preventDefault();
-      setLogHeight(MAX_LOG_DRAWER_HEIGHT);
+      onLogHeightChange(MAX_LOG_DRAWER_HEIGHT);
     }
   }
 
@@ -129,6 +167,21 @@ export function AppLayout({
       logEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [logs, logOpen]);
+
+  useLayoutEffect(() => {
+    const panel = tabPanelRef.current;
+    if (!panel) return;
+    const previous = previousTabRef.current;
+    if (previous !== activeTab) {
+      tabScrollPositionsRef.current[previous] = panel.scrollTop;
+      panel.scrollTop = tabScrollPositionsRef.current[activeTab];
+      previousTabRef.current = activeTab;
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (shortcutsOpen) shortcutsCloseRef.current?.focus();
+  }, [shortcutsOpen]);
 
   useEffect(() => {
     return () => {
@@ -142,8 +195,8 @@ export function AppLayout({
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        if (shortcutsOpen) setShortcutsOpen(false);
-        else if (logOpen) setLogOpen(false);
+        if (shortcutsOpen) closeShortcuts();
+        else if (logOpen) onLogOpenChange(false);
         return;
       }
       if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -152,48 +205,70 @@ export function AppLayout({
           target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
         if (isEditable) return;
         event.preventDefault();
-        setShortcutsOpen((value) => !value);
+        if (shortcutsOpen) closeShortcuts();
+        else openShortcuts();
       }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [logOpen, shortcutsOpen]);
+  }, [closeShortcuts, logOpen, onLogOpenChange, openShortcuts, shortcutsOpen]);
 
   return (
     <>
       <div className="app-layout">
         <aside className="sidebar">{sidebar}</aside>
         <div className="main-content">
-          <div className="tab-bar">
+          <div className="tab-bar" role="tablist" aria-label="工作台页面">
             <button
               className="tab-button"
+              data-native-acceptance-target="tab-run"
               type="button"
               data-active={activeTab === "run"}
-              onClick={() => onTabChange("run")}
+              id="tab-run"
+              role="tab"
+              aria-selected={activeTab === "run"}
+              aria-controls="workbench-panel"
+              onClick={() => selectTab("run")}
             >
               <Settings2 size={14} />
               运行
             </button>
             <button
               className="tab-button"
+              data-native-acceptance-target="tab-connect"
               type="button"
               data-active={activeTab === "connect"}
-              onClick={() => onTabChange("connect")}
+              id="tab-connect"
+              role="tab"
+              aria-selected={activeTab === "connect"}
+              aria-controls="workbench-panel"
+              onClick={() => selectTab("connect")}
             >
               <Link2 size={14} />
               连接
             </button>
             <button
               className="tab-button"
+              data-native-acceptance-target="tab-test"
               type="button"
               data-active={activeTab === "test"}
-              onClick={() => onTabChange("test")}
+              id="tab-test"
+              role="tab"
+              aria-selected={activeTab === "test"}
+              aria-controls="workbench-panel"
+              onClick={() => selectTab("test")}
             >
               <FlaskConical size={14} />
               测试
             </button>
           </div>
-          <div className="tab-panel">
+          <div
+            className="tab-panel"
+            id="workbench-panel"
+            role="tabpanel"
+            aria-labelledby={`tab-${activeTab}`}
+            ref={tabPanelRef}
+          >
             {activeTab === "run" && runContent}
             {activeTab === "connect" && connectionContent}
             {activeTab === "test" && testContent}
@@ -324,7 +399,8 @@ export function AppLayout({
             type="button"
             aria-label="查看快捷键"
             title="快捷键（?）"
-            onClick={() => setShortcutsOpen(true)}
+            ref={shortcutsTriggerRef}
+            onClick={openShortcuts}
           >
             <HelpCircle size={12} />
           </button>
@@ -332,7 +408,7 @@ export function AppLayout({
             className="log-toggle-btn"
             type="button"
             data-open={logOpen}
-            onClick={() => setLogOpen(!logOpen)}
+            onClick={() => onLogOpenChange(!logOpen)}
           >
             日志 {logs.length}
             <ChevronDown size={12} />
@@ -345,7 +421,13 @@ export function AppLayout({
           role="dialog"
           aria-modal="true"
           aria-label="快捷键"
-          onClick={() => setShortcutsOpen(false)}
+          onClick={closeShortcuts}
+          onKeyDown={(event) => {
+            if (event.key === "Tab") {
+              event.preventDefault();
+              shortcutsCloseRef.current?.focus();
+            }
+          }}
         >
           <div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}>
             <div className="shortcuts-header">
@@ -354,7 +436,8 @@ export function AppLayout({
                 type="button"
                 aria-label="关闭"
                 className="shortcuts-close"
-                onClick={() => setShortcutsOpen(false)}
+                ref={shortcutsCloseRef}
+                onClick={closeShortcuts}
               >
                 ×
               </button>

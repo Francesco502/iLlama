@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   LaunchConfig,
   LogEntry,
@@ -6,21 +7,117 @@ import type {
   PrometheusHintsConfig,
   RuntimeMetrics,
   RuntimeStatus,
+  SamplingParameters,
+  StartupParameters,
   ValidationResult,
 } from "../types/domain";
 
 export interface AppSettings {
-  schemaVersion: number;
+  schemaVersion: 3;
   modelDirectories: string[];
   llamaServerPath: string | null;
-  defaultPresetId: string;
-  parameterPresetSourceId?: string;
-  lastSelectedModelPath: string | null;
-  autoPort: boolean;
-  defaultPort: number;
-  idleSleepSeconds: number;
-  prometheusHints?: PrometheusHintsConfig;
-  showInMenuBar?: boolean;
+  launchDraft: {
+    profileId: "auto" | "custom";
+    parameterPresetSourceId: string;
+    selectedModelPath: string | null;
+    autoPort: boolean;
+    port: number;
+    parameters: StartupParameters;
+    prometheusHints: PrometheusHintsConfig;
+  };
+  sampling: SamplingParameters;
+  ui: {
+    showInMenuBar: boolean;
+    logPanelOpen: boolean;
+    logPanelHeight: number;
+    advancedOpen: boolean;
+  };
+}
+
+export interface SettingsWarning {
+  code: string;
+  message: string;
+  recoveryAction: string;
+  recoveryTarget: string | null;
+}
+
+export interface CommandError {
+  code: string;
+  message: string;
+  recoveryAction: string;
+}
+
+export function normalizeCommandError(error: unknown): CommandError {
+  if (error && typeof error === "object") {
+    const value = error as Partial<CommandError>;
+    if (typeof value.message === "string") {
+      return {
+        code: typeof value.code === "string" ? value.code : "command_failed",
+        message: value.message,
+        recoveryAction:
+          typeof value.recoveryAction === "string" ? value.recoveryAction : "viewLogs",
+      };
+    }
+  }
+  return {
+    code: "command_failed",
+    message: error instanceof Error ? error.message : String(error),
+    recoveryAction: "viewLogs",
+  };
+}
+
+export interface SettingsEnvelope {
+  settings: AppSettings;
+  warnings: SettingsWarning[];
+}
+
+export interface ActiveLaunchSnapshot {
+  binaryPath: string;
+  modelPath: string;
+  host: "127.0.0.1";
+  port: number;
+  parameters: ResolvedStartupParameters;
+  /** Exact argv accepted by capability filtering; authoritative for what was applied. */
+  commandArgs: string[];
+  prometheusHints: PrometheusHintsConfig;
+  startedAt: string;
+  modelId: string | null;
+  serverCapabilities: ServerCapabilities | null;
+}
+
+export type AppliedParameter<T> =
+  | { source: "argument"; value: T }
+  | { source: "serverDefault"; value: null };
+
+export interface ResolvedStartupParameters {
+  ctxSize: AppliedParameter<StartupParameters["ctxSize"]>;
+  threads: AppliedParameter<StartupParameters["threads"]>;
+  threadsBatch: AppliedParameter<StartupParameters["threadsBatch"]>;
+  gpuLayers: AppliedParameter<StartupParameters["gpuLayers"]>;
+  batchSize: AppliedParameter<StartupParameters["batchSize"]>;
+  ubatchSize: AppliedParameter<StartupParameters["ubatchSize"]>;
+  flashAttention: AppliedParameter<StartupParameters["flashAttention"]>;
+  mmap: AppliedParameter<StartupParameters["mmap"]>;
+  mlock: AppliedParameter<StartupParameters["mlock"]>;
+  metrics: AppliedParameter<StartupParameters["metrics"]>;
+  idleSleepSeconds: AppliedParameter<StartupParameters["idleSleepSeconds"]>;
+  mmprojPath: AppliedParameter<string>;
+  mmprojOffload: AppliedParameter<StartupParameters["mmprojOffload"]>;
+}
+
+export interface ServerCapabilities {
+  binaryPath: string;
+  versionText: string | null;
+  supportedFlags: string[];
+  status: "compatible" | "limited" | "invalid";
+  warnings: string[];
+}
+
+export interface CommandSpec {
+  executable: string;
+  args: string[];
+  warnings: string[];
+  capabilities: ServerCapabilities;
 }
 
 export interface RuntimeSnapshot {
@@ -28,6 +125,7 @@ export interface RuntimeSnapshot {
   pid: number | null;
   startedAt: string | null;
   activeModelPath: string | null;
+  activeLaunch: ActiveLaunchSnapshot | null;
   lastError: string | null;
   metrics: RuntimeMetrics;
   logs: LogEntry[];
@@ -38,24 +136,104 @@ export interface HealthStatus {
   message: string;
 }
 
+export interface ModelScanProgress {
+  requestId: string;
+  directory: string;
+  /** Regular files visited by the non-hidden directory walk, including non-GGUF/mmproj files. */
+  filesScanned: number;
+  /** Available non-mmproj GGUF models; invalid candidates are excluded. */
+  modelsFound: number;
+}
+
+export interface ModelScanResult {
+  requestId: string;
+  directory: string;
+  models: ModelEntry[];
+  filesScanned: number;
+  modelsFound: number;
+}
+
+export interface NativeAcceptanceConfig {
+  surface: "deep-runner" | "normal-app";
+  runNonce: string;
+  binaryPath: string;
+  modelPath: string;
+  modelDirectory: string;
+  reportPath: string;
+  occupiedPort: number;
+  preferredPort: number;
+  startupTimeoutMs: number;
+  chatTimeoutMs: number;
+  cancellationTimeoutMs: number;
+  fixtureControl: boolean;
+  externalClient: string | null;
+  viewportWidth: number;
+  viewportHeight: number;
+}
+
+export interface SettingsFileSnapshot {
+  exists: boolean;
+  byteLength: number;
+  sha256: string | null;
+}
+
+export interface SettingsIsolationEvidence {
+  mode: "in-memory";
+  path: string;
+  before: SettingsFileSnapshot;
+  after: SettingsFileSnapshot;
+  unchanged: boolean;
+}
+
+export interface NormalAcceptanceObservation {
+  sequence: number;
+  kind: "ready" | "focus" | "input" | "milestone" | "failure";
+  target?: string;
+  key?: string;
+  isTrusted?: true;
+  name?: string;
+  detail?: string;
+}
+
 export function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
 }
 
-export async function loadSettings(): Promise<AppSettings> {
-  return invoke<AppSettings>("load_settings_command");
+export async function loadSettings(): Promise<SettingsEnvelope> {
+  return invoke<SettingsEnvelope>("load_settings_command");
 }
 
 export async function resolveLlamaServerPath(requestedPath?: string | null): Promise<string | null> {
   return invoke<string | null>("resolve_llama_server_path_command", { requestedPath });
 }
 
-export async function saveSettings(settings: AppSettings): Promise<void> {
-  await invoke("save_settings_command", { settings });
+export type AppSettingsPatch = Omit<Partial<AppSettings>, "ui"> & {
+  ui?: Partial<AppSettings["ui"]>;
+};
+
+export async function patchSettings(patch: AppSettingsPatch): Promise<SettingsEnvelope> {
+  return invoke<SettingsEnvelope>("patch_settings_command", { patch });
 }
 
-export async function scanModelDirectory(path: string): Promise<ModelEntry[]> {
-  return invoke<ModelEntry[]>("scan_model_directory_command", { path });
+export async function revealSettingsBackup(path: string): Promise<void> {
+  return invoke<void>("reveal_settings_backup_command", { path });
+}
+
+export async function scanModelDirectory(
+  path: string,
+  requestId: string,
+  onProgress?: (progress: ModelScanProgress) => void,
+): Promise<ModelScanResult> {
+  const unlisten = onProgress
+    ? await listen<ModelScanProgress>("model-scan-progress", (event) => {
+        if (event.payload.requestId === requestId) onProgress(event.payload);
+      })
+    : undefined;
+  try {
+    return await invoke<ModelScanResult>("scan_model_directory_command", { path, requestId });
+  } finally {
+    unlisten?.();
+  }
 }
 
 export async function validateLaunchConfig(config: LaunchConfig): Promise<ValidationResult> {
@@ -64,6 +242,17 @@ export async function validateLaunchConfig(config: LaunchConfig): Promise<Valida
 
 export async function buildCommandArgs(config: LaunchConfig): Promise<string[]> {
   return invoke<string[]>("build_command_args_command", { config });
+}
+
+export async function probeLlamaServer(path: string): Promise<ServerCapabilities> {
+  return invoke<ServerCapabilities>("probe_llama_server_command", { path });
+}
+
+export async function buildCommandSpec(
+  config: LaunchConfig,
+  capabilities?: ServerCapabilities,
+): Promise<CommandSpec> {
+  return invoke<CommandSpec>("build_command_spec_command", { config, capabilities });
 }
 
 export async function startLlama(config: LaunchConfig): Promise<RuntimeSnapshot> {
@@ -78,10 +267,6 @@ export async function runtimeSnapshot(): Promise<RuntimeSnapshot> {
   return invoke<RuntimeSnapshot>("runtime_snapshot_command");
 }
 
-export async function confirmHealth(): Promise<void> {
-  await invoke("confirm_health_command");
-}
-
 export async function checkHealth(host: string, port: number): Promise<HealthStatus> {
   return invoke<HealthStatus>("check_health_command", { host, port });
 }
@@ -90,8 +275,34 @@ export async function findAvailablePort(host: string, preferred: number): Promis
   return invoke<number>("find_available_port_command", { host, preferred });
 }
 
-export async function setTrayEnabled(enabled: boolean): Promise<void> {
-  await invoke("set_tray_enabled_command", { enabled });
+export async function nativeAcceptanceConfig(): Promise<NativeAcceptanceConfig | null> {
+  return invoke<NativeAcceptanceConfig | null>("native_acceptance_config_command");
+}
+
+export async function markNativeAcceptanceRunnerStarted(): Promise<void> {
+  return invoke<void>("native_acceptance_runner_started_command");
+}
+
+export async function reportNormalAcceptanceProgress(
+  observation: NormalAcceptanceObservation,
+): Promise<void> {
+  return invoke<void>("normal_acceptance_progress_command", { observation });
+}
+
+export async function nativeAcceptanceSettingsIsolation(): Promise<SettingsIsolationEvidence> {
+  return invoke<SettingsIsolationEvidence>("native_acceptance_settings_isolation_command");
+}
+
+export async function writeNativeAcceptanceReport(report: unknown): Promise<void> {
+  return invoke<void>("write_native_acceptance_report_command", { report });
+}
+
+export async function finishNativeAcceptance(report: unknown, exitCode: 0 | 1): Promise<void> {
+  return invoke<void>("finish_native_acceptance_command", { report, exitCode });
+}
+
+export async function setTrayEnabled(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("set_tray_enabled_command", { enabled });
 }
 
 export async function getTrayEnabled(): Promise<boolean> {

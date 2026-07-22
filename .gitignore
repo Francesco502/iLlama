@@ -1,5 +1,9 @@
 node_modules/
+.worktrees/
+.superpowers/
 dist/
+playwright-report/
+test-results/
 src-tauri/target/
 src-tauri/gen/
 .DS_Store

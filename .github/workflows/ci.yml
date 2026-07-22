@@ -3,9 +3,40 @@ name: CI
 on:
   push:
     branches: [main, master]
+    tags: ["v3.2.0*"]
   pull_request:
 
 jobs:
+  policy:
+    name: Version and security policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - run: npm ci
+      - name: Install pinned prebuilt cargo-audit
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: cargo-audit@0.22.2
+          fallback: none
+      - run: npm run test:release-policy
+      - run: npm run test:release-evidence
+      - run: npm run check:project
+      - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev
+      - name: Fresh RustSec audit and bounded-review comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo audit --json --file src-tauri/Cargo.lock > "$RUNNER_TEMP/cargo-audit.json"
+          node scripts/verify-project-policy.mjs --audit "$RUNNER_TEMP/cargo-audit.json"
+
   frontend:
     name: Frontend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -14,8 +45,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22"
           cache: npm
@@ -24,8 +55,35 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  ui:
+    name: Browser UI and accessibility (test-only fixtures; no native runtime)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
+
+  tauri-contract:
+    name: Packaged Tauri WebView + IPC runtime acceptance (macOS 15)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - run: npm ci
+      - run: npm run test:native-controller
+      - run: npm run test:tauri -- --surface deep-runner
+
   rust:
-    name: Rust (${{ matrix.os }})
+    name: Rust unit and integration contracts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -35,7 +93,7 @@ jobs:
       run:
         working-directory: src-tauri
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install Linux Tauri dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -46,7 +104,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check

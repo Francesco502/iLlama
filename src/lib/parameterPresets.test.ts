@@ -62,11 +62,11 @@ describe("parameter preset sources", () => {
 
     const result = applyParameterPresetSource("user:low-memory", baseModel, parameters, sampling);
 
-    expect(result.source.name).toBe("低内存");
+    expect(result.source.name).toBe("兼容模式");
     expect(result.parameters.ctxSize).toBe(131072);
     expect(result.parameters.batchSize).toBe(512);
     expect(result.parameters.ubatchSize).toBe(128);
-    expect(result.parameters.flashAttention).toBe("off");
+    expect(result.parameters.flashAttention).toBe("auto");
     expect(result.sampling.temperature).toBe(0.6);
     expect(result.sampling.topP).toBe(0.9);
   });

@@ -1,34 +1,66 @@
 # External Client Compatibility
 
-This matrix is the V3 release gate for clients that consume iLlama's OpenAI-compatible endpoint.
+This matrix is a 3.2.0 release gate for clients that consume the active external
+`llama-server` endpoint. It records executable evidence separately from
+configuration guidance.
 
-iLlama exposes:
+When the runtime is healthy, iLlama exposes values from its immutable active
+launch snapshot:
 
 ```text
-Base URL: http://127.0.0.1:<port>/v1
+Base URL: http://127.0.0.1:<actual-port>/v1
 API Key: llama
-Model: <selected GGUF file name>
-Chat Completions: http://127.0.0.1:<port>/v1/chat/completions
-Models: http://127.0.0.1:<port>/v1/models
+Model: </v1/models first returned ID>
+Chat Completions: http://127.0.0.1:<actual-port>/v1/chat/completions
+Models: http://127.0.0.1:<actual-port>/v1/models
 ```
 
-## V3.1.0 Profile Matrix
+Draft model names and requested ports are previews only. They must not replace
+the active endpoint or model ID while a server is running.
 
-| Client | Profile field names | Tested version | Config path | Streaming | Images | Status | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Chatbox | Base URL, API Key, Model | TBD before signed release | Settings / Model Provider / OpenAI-compatible | TBD | TBD | Profile shipped, manual validation pending | Use the value from iLlama's `Base URL`; keep API key non-empty. |
-| Cherry Studio | API Host, API Key, Model | TBD before signed release | Providers / OpenAI-compatible | TBD | TBD | Profile shipped, manual validation pending | Some builds label the base URL as API host. |
-| Open WebUI | OpenAI API Base URL, API Key, Model | TBD before signed release | Admin / Settings / Connections | TBD | TBD | Profile shipped, manual validation pending | Usually expects the `/v1` base URL, not the chat-completions URL. |
-| AnythingLLM | Base URL, API Key, Model | TBD before signed release | LLM Preference / OpenAI-compatible | TBD | TBD | Profile shipped, manual validation pending | Confirm whether workspace-level model selection overrides provider model. |
-| Custom OpenAI-compatible client | Base URL, API Key, Model | Per client | Per client | Per client | Per client | Supported by contract | Start with `/v1/models`, then `/v1/chat/completions`. |
+## 3.2.0 profile matrix
 
-## Manual Validation Steps
+| Client | Profile field names | Exact tested version | Required behavior | Release status |
+| --- | --- | --- | --- | --- |
+| Executable `curl` | URL and JSON `model` field | Captured from the exact executed `curl --version` output | `/v1/models`, non-stream chat, SSE content followed by `[DONE]`, and client cancellation | Pending protected acceptance; the evidence validator may mark this Verified only after executing and hashing the discovered binary. |
+| Chatbox | Base URL, API Key, Model | Not run | Configuration reference only | Pending |
+| Cherry Studio | API Host, API Key, Model | Not run | Configuration reference only | Pending |
+| Open WebUI | OpenAI API Base URL, API Key, Model | Not run | Configuration reference only | Pending |
+| AnythingLLM | Base URL, API Key, Model | Not run | Configuration reference only | Pending |
+| Other OpenAI-compatible GUI | Product-specific | Not run | Configuration reference only | Pending |
 
-1. Launch iLlama with a real `llama-server` and a small GGUF model.
-2. Open `连接` and click `检测连接`; record `/health`, `/v1/models`, and the model IDs shown.
-3. In the external client, configure the profile using the exact field names in the matrix.
-4. Send a short text prompt and confirm streaming behavior.
-5. If the client supports image input, repeat with a model + `mmproj` capable of vision requests.
-6. Record the client version, platform, config path, streaming result, image result, and any field-name mismatch.
+The GUI rows are configuration references, not compatibility claims. A profile,
+screenshot, self-reported version, or manually entered success value cannot
+change a row to Verified. For 3.2.0, only the repository's protected executable
+`curl` path is an automated external-client release gate.
 
-Do not mark a row as validated unless it was tested against a locally running iLlama v3.1.0 build and the exact client version is recorded.
+## Executable evidence contract
+
+The `external-client` acceptance job must launch the packaged native Tauri app
+against a real external `llama-server` and GGUF, then execute the discovered
+`curl` binary. Its report must include and validate:
+
+- the canonical `curl` executable path, SHA-256, and exact multiline
+  `curl --version` output;
+- the active loopback endpoint and model ID returned by `/v1/models`;
+- a successful non-streaming `/v1/chat/completions` response;
+- an SSE response containing content and a terminal `[DONE]` event;
+- cancellation performed against the spawned client process;
+- the candidate repository, 40-character HEAD SHA, workflow path, run ID, and
+  run attempt;
+- a bounded, redacted transcript and its SHA-256.
+
+The uploaded artifact name is
+`evidence-external-client-<HEAD_SHA>-<RUN_ID>-<RUN_ATTEMPT>`. The release job
+must fetch that exact, unexpired artifact and confirm that the GitHub workflow
+run succeeded on the same repository and candidate SHA. Until such a run exists,
+the row remains Pending.
+
+## Optional GUI investigation
+
+GUI clients may still be explored manually. Record the product version,
+platform, exact profile fields, detected model ID, streaming behavior, and any
+field-name mismatch, but retain `Pending` unless a future protected workflow
+adds an executable, tamper-evident validator for that client. Use the `/v1` base
+URL rather than the chat-completions URL, keep the API key non-empty where the
+client requires it, and copy the detected model ID exactly.

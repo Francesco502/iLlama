@@ -72,8 +72,19 @@ describe("chat streaming parser", () => {
 });
 
 describe("chat request body", () => {
+  it("uses the model ID discovered from the active runtime", () => {
+    const body = buildChatCompletionBody({
+      modelId: "runtime-model-id",
+      messages: [{ role: "user", content: "ping" }],
+      sampling,
+    });
+
+    expect(body.model).toBe("runtime-model-id");
+  });
+
   it("serializes image attachments as OpenAI-compatible content parts", () => {
     const body = buildChatCompletionBody({
+      modelId: "runtime-model-id",
       messages: [
         {
           role: "user",
@@ -106,6 +117,7 @@ describe("chat request body", () => {
 
   it("merges text-snippet attachments into plain string content", () => {
     const body = buildChatCompletionBody({
+      modelId: "runtime-model-id",
       messages: [
         {
           role: "user",
@@ -133,6 +145,7 @@ describe("chat request body", () => {
 
   it("combines text snippet and image as multipart content", () => {
     const body = buildChatCompletionBody({
+      modelId: "runtime-model-id",
       messages: [
         {
           role: "user",
@@ -185,6 +198,7 @@ describe("chat completion API", () => {
     const result = await completeChatCompletion({
       host: "127.0.0.1",
       port: 8080,
+      modelId: "runtime-model-id",
       messages: [{ role: "user", content: "你好" }],
       sampling,
     });
@@ -197,12 +211,13 @@ describe("chat completion API", () => {
       },
       body: JSON.stringify(
         buildChatCompletionBody({
+          modelId: "runtime-model-id",
           messages: [{ role: "user", content: "你好" }],
           sampling,
           stream: false,
         }),
       ),
-      signal: undefined,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -213,6 +228,7 @@ describe("chat completion API", () => {
       completeChatCompletion({
         host: "127.0.0.1",
         port: 8080,
+        modelId: "runtime-model-id",
         messages: [{ role: "user", content: "你好" }],
         sampling,
       }),
@@ -221,6 +237,28 @@ describe("chat completion API", () => {
 });
 
 describe("chat streaming API", () => {
+  it("aborts a chat request after 120 seconds", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = streamChatCompletion({
+      host: "127.0.0.1",
+      port: 8080,
+      modelId: "runtime-model-id",
+      messages: [{ role: "user", content: "你好" }],
+      sampling,
+    });
+    const rejection = expect(pending).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(120_000);
+    await rejection;
+    vi.useRealTimers();
+  });
+
   it("blocks image requests when the server reports no multimodal capability", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -236,6 +274,7 @@ describe("chat streaming API", () => {
       streamChatCompletion({
         host: "127.0.0.1",
         port: 8080,
+        modelId: "runtime-model-id",
         messages: [
           {
             role: "user",
@@ -258,7 +297,7 @@ describe("chat streaming API", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/v1/models", {
-      signal: undefined,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -287,6 +326,7 @@ describe("chat streaming API", () => {
     await streamChatCompletion({
       host: "127.0.0.1",
       port: 8080,
+      modelId: "runtime-model-id",
       messages: [{ role: "user", content: "你好" }],
       sampling,
       onDelta,

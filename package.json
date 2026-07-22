@@ -1,6 +1,6 @@
 {
   "name": "illama",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,12 +9,20 @@
     "lint": "eslint . --max-warnings=0",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:ui": "playwright test",
+    "test:tauri": "node scripts/native-tauri-acceptance.mjs",
+    "test:rust-contract": "cargo test --manifest-path src-tauri/Cargo.toml --test acceptance_tests --test llama_process_tests --test model_scan_tests --test server_probe_tests --test settings_tests",
+    "test:native-controller": "node --test scripts/fake-llama-server.test.mjs scripts/tests/gguf-fixture.test.mjs scripts/tests/native-tauri-acceptance.test.mjs",
+    "test:release-evidence": "node --test scripts/tests/portable-checksum.test.mjs scripts/tests/release-evidence.test.mjs",
+    "test:release-policy": "node --test scripts/tests/release-infrastructure.test.mjs scripts/tests/verify-project-policy.test.mjs",
     "test:watch": "vitest",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "release:macos": "node scripts/release-macos.mjs",
     "release:llama-matrix": "node scripts/real-smoke-matrix.mjs",
-    "prepare:sidecar": "node scripts/prepare-sidecar.mjs"
+    "release:infrastructure": "node scripts/release-infrastructure.mjs",
+    "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "check:project": "node scripts/verify-project-policy.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -28,7 +36,9 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "^2.0.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
@@ -44,6 +54,6 @@
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.59.3",
     "vite": "^6.0.3",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.10"
   }
 }

@@ -1,5 +1,5 @@
 import { Clipboard, ExternalLink, FlaskConical } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   buildExternalClientCopyText,
   buildExternalClientJson,
@@ -35,6 +35,26 @@ export function ConnectionPanel({
     status: "idle" | "checking" | "complete";
     result: RuntimeConnectionCheckResult | null;
   }>({ status: "idle", result: null });
+  const checkControllerRef = useRef<AbortController | null>(null);
+  const checkGenerationRef = useRef(0);
+
+  useEffect(() => {
+    checkGenerationRef.current += 1;
+    checkControllerRef.current?.abort();
+    checkControllerRef.current = null;
+    setCheckState({ status: "idle", result: null });
+    return () => {
+      checkGenerationRef.current += 1;
+      checkControllerRef.current?.abort();
+    };
+  }, [
+    connection.healthy,
+    connection.host,
+    connection.model,
+    connection.modelsUrl,
+    connection.port,
+    connection.source,
+  ]);
 
   async function copy(text: string, label: string, type: "info" | "json") {
     try {
@@ -58,10 +78,16 @@ export function ConnectionPanel({
   }
 
   async function handleConnectionCheck() {
+    checkControllerRef.current?.abort();
+    const controller = new AbortController();
+    checkControllerRef.current = controller;
+    const generation = ++checkGenerationRef.current;
     setCheckState({ status: "checking", result: null });
-    const result = await checkRuntimeConnection(connection);
+    const result = await checkRuntimeConnection(connection, controller.signal);
+    if (controller.signal.aborted || generation !== checkGenerationRef.current) return;
     setCheckState({ status: "complete", result });
     appendSystemLog(result.message);
+    checkControllerRef.current = null;
   }
 
   return (
@@ -121,6 +147,7 @@ export function ConnectionPanel({
           </button>
           <button
             className="ghost-button"
+            data-native-acceptance-target="connection-check"
             type="button"
             disabled={checkState.status === "checking"}
             onClick={() => void handleConnectionCheck()}
@@ -128,7 +155,7 @@ export function ConnectionPanel({
             <FlaskConical size={14} />
             {checkState.status === "checking" ? "检测中" : "检测连接"}
           </button>
-          <button className="start-button secondary" type="button" onClick={onOpenTest}>
+          <button className="start-button secondary" data-native-acceptance-target="open-test" type="button" onClick={onOpenTest}>
             <FlaskConical size={14} />
             打开测试
           </button>
@@ -169,6 +196,7 @@ export function ConnectionPanel({
               <div>
                 <h3>{profile.name}</h3>
                 <p>{profile.summary}</p>
+                <small className="client-compatibility-status">兼容配置参考 · 尚未完成真实版本验证</small>
               </div>
               <div className="external-client-fields">
                 {profile.fields.map((field) => (
@@ -216,4 +244,3 @@ export function ConnectionPanel({
     </div>
   );
 }
-

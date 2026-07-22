@@ -1,16 +1,16 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  checkHealth,
-  confirmHealth,
   isTauriRuntime,
-  runtimeSnapshot,
+  normalizeCommandError,
+  runtimeSnapshot as fetchRuntimeSnapshot,
   startLlama,
   stopLlama,
+  type RuntimeSnapshot,
+  type CommandError,
 } from "../api/tauri";
-import type { LaunchConfig, LogEntry, RuntimeMetrics, RuntimeStatus } from "../types/domain";
+import type { LaunchConfig, LogEntry, RuntimeMetrics } from "../types/domain";
 
 const HEALTH_POLL_INTERVAL_MS = 5_000;
-const HEALTH_STARTUP_TIMEOUT_MS = 120_000;
 const HEALTH_STARTUP_INITIAL_DELAY_MS = 800;
 const HEALTH_STARTUP_MAX_DELAY_MS = 4_000;
 
@@ -22,6 +22,17 @@ const idleMetrics: RuntimeMetrics = {
   kvCacheUsageRatio: null,
 };
 
+const idleSnapshot: RuntimeSnapshot = {
+  status: "idle",
+  pid: null,
+  startedAt: null,
+  activeModelPath: null,
+  activeLaunch: null,
+  lastError: null,
+  metrics: idleMetrics,
+  logs: [],
+};
+
 interface UseLlamaProcessOptions {
   appendSystemLog: (message: string) => void;
   mergeLogs: (incoming: LogEntry[]) => void;
@@ -29,146 +40,202 @@ interface UseLlamaProcessOptions {
 }
 
 export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLlamaProcessOptions) {
-  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>("idle");
-  const [runtimeMetrics, setRuntimeMetrics] = useState<RuntimeMetrics>(idleMetrics);
-  const healthPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startupAbortRef = useRef<AbortController | null>(null);
+  const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(idleSnapshot);
+  const [isStartPending, setIsStartPending] = useState(false);
+  const [commandError, setCommandError] = useState<CommandError | null>(null);
+  const startPendingRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nextStartupDelayRef = useRef(HEALTH_STARTUP_INITIAL_DELAY_MS);
+  const healthyNotifiedRef = useRef(false);
+  const lastErrorRef = useRef<string | null>(null);
+  const generationRef = useRef(0);
+  const appendSystemLogRef = useRef(appendSystemLog);
+  const applySnapshotRef = useRef<(next: RuntimeSnapshot) => void>(() => undefined);
+  const pollRuntimeRef = useRef<(generation: number) => Promise<void>>(async () => undefined);
+  appendSystemLogRef.current = appendSystemLog;
 
   const stopHealthPoll = useCallback(() => {
-    if (healthPollRef.current !== null) {
-      clearInterval(healthPollRef.current);
-      healthPollRef.current = null;
-    }
-    if (startupAbortRef.current) {
-      startupAbortRef.current.abort();
-      startupAbortRef.current = null;
+    generationRef.current += 1;
+    if (pollTimerRef.current !== null) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
     }
   }, []);
 
-  const startHealthPoll = useCallback(() => {
-    stopHealthPoll();
-    healthPollRef.current = setInterval(async () => {
-      try {
-        const snapshot = await runtimeSnapshot();
-        setRuntimeMetrics(snapshot.metrics);
-        mergeLogs(snapshot.logs);
-        if (snapshot.status === "stopped" || snapshot.status === "failed") {
-          setRuntimeStatus(snapshot.status);
-          if (snapshot.lastError) {
-            appendSystemLog(snapshot.lastError);
-          }
-          appendSystemLog("检测到 llama-server 已停止运行。");
-          stopHealthPoll();
-        }
-      } catch {
-        // Ignore transient errors during polling
+  const applySnapshot = useCallback(
+    (next: RuntimeSnapshot) => {
+      setSnapshot(next);
+      mergeLogs(next.logs);
+      if (next.lastError && next.lastError !== lastErrorRef.current) {
+        lastErrorRef.current = next.lastError;
+        appendSystemLog(next.lastError);
       }
-    }, HEALTH_POLL_INTERVAL_MS);
-  }, [appendSystemLog, mergeLogs, stopHealthPoll]);
-
-  const pollUntilHealthy = useCallback(
-    async (healthPort: number) => {
-      const controller = new AbortController();
-      startupAbortRef.current = controller;
-      const startedAt = performance.now();
-      let delay = HEALTH_STARTUP_INITIAL_DELAY_MS;
-
-      while (!controller.signal.aborted) {
-        const elapsed = performance.now() - startedAt;
-        if (elapsed >= HEALTH_STARTUP_TIMEOUT_MS) {
-          if (!controller.signal.aborted) {
-            setRuntimeStatus("failed");
-            appendSystemLog(
-              `健康检查在 ${Math.round(HEALTH_STARTUP_TIMEOUT_MS / 1000)} 秒内未通过，请查看启动日志或检查模型文件。`,
-            );
-          }
-          startupAbortRef.current = null;
-          return;
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, delay));
-        if (controller.signal.aborted) {
-          startupAbortRef.current = null;
-          return;
-        }
-        const snapshot = await runtimeSnapshot();
-        setRuntimeMetrics(snapshot.metrics);
-        mergeLogs(snapshot.logs);
-        if (snapshot.status === "stopped" || snapshot.status === "failed") {
-          setRuntimeStatus(snapshot.status);
-          if (snapshot.lastError) {
-            appendSystemLog(snapshot.lastError);
-          }
-          startupAbortRef.current = null;
-          return;
-        }
-        const health = await checkHealth("127.0.0.1", healthPort);
-        if (health.healthy) {
-          await confirmHealth();
-          setRuntimeStatus("healthy");
-          appendSystemLog("健康检查通过，可以开始对话。");
-          startupAbortRef.current = null;
-          startHealthPoll();
-          onHealthy?.();
-          return;
-        }
-        delay = Math.min(HEALTH_STARTUP_MAX_DELAY_MS, Math.round(delay * 1.4));
+      if (next.status === "healthy" && !healthyNotifiedRef.current) {
+        healthyNotifiedRef.current = true;
+        appendSystemLog("健康检查通过，可以开始对话。");
+        onHealthy?.();
       }
-      startupAbortRef.current = null;
+      if (next.status !== "healthy") {
+        healthyNotifiedRef.current = false;
+      }
     },
-    [appendSystemLog, mergeLogs, startHealthPoll, onHealthy],
+    [appendSystemLog, mergeLogs, onHealthy],
   );
+
+  const pollRuntime = useCallback(async (generation: number) => {
+    try {
+      const next = await fetchRuntimeSnapshot();
+      if (generation !== generationRef.current) return;
+      applySnapshot(next);
+      if (next.pid === null) {
+        pollTimerRef.current = null;
+        return;
+      }
+      const delay =
+        next.status === "starting"
+          ? nextStartupDelayRef.current
+          : HEALTH_POLL_INTERVAL_MS;
+      if (next.status === "starting") {
+        nextStartupDelayRef.current = Math.min(
+          HEALTH_STARTUP_MAX_DELAY_MS,
+          Math.round(nextStartupDelayRef.current * 1.4),
+        );
+      }
+      pollTimerRef.current = setTimeout(() => void pollRuntime(generation), delay);
+    } catch (error) {
+      if (generation !== generationRef.current) return;
+      appendSystemLog(
+        `读取运行状态失败，将自动重试：${error instanceof Error ? error.message : String(error)}`,
+      );
+      pollTimerRef.current = setTimeout(
+        () => void pollRuntime(generation),
+        HEALTH_POLL_INTERVAL_MS,
+      );
+    }
+  }, [appendSystemLog, applySnapshot]);
+
+  const startHealthPoll = useCallback((generation: number) => {
+    nextStartupDelayRef.current = HEALTH_STARTUP_INITIAL_DELAY_MS;
+    pollTimerRef.current = setTimeout(
+      () => void pollRuntime(generation),
+      HEALTH_STARTUP_INITIAL_DELAY_MS,
+    );
+  }, [pollRuntime]);
+
+  applySnapshotRef.current = applySnapshot;
+  pollRuntimeRef.current = pollRuntime;
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const generation = generationRef.current;
+    let disposed = false;
+    void fetchRuntimeSnapshot()
+      .then((next) => {
+        if (disposed || generation !== generationRef.current) return;
+        applySnapshotRef.current(next);
+        if (next.pid !== null) {
+          nextStartupDelayRef.current = HEALTH_STARTUP_INITIAL_DELAY_MS;
+          pollTimerRef.current = setTimeout(
+            () => void pollRuntimeRef.current(generation),
+            HEALTH_STARTUP_INITIAL_DELAY_MS,
+          );
+        }
+      })
+      .catch((error) => {
+        if (disposed || generation !== generationRef.current) return;
+        appendSystemLogRef.current(
+          `恢复运行状态失败，将自动重试：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        pollTimerRef.current = setTimeout(
+          () => void pollRuntimeRef.current(generation),
+          HEALTH_POLL_INTERVAL_MS,
+        );
+      });
+    return () => {
+      disposed = true;
+      generationRef.current += 1;
+      if (pollTimerRef.current !== null) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleStart = useCallback(
     async (config: LaunchConfig) => {
+      if (startPendingRef.current) return;
+      startPendingRef.current = true;
+      setIsStartPending(true);
+      stopHealthPoll();
+      const generation = generationRef.current;
+      healthyNotifiedRef.current = false;
+      lastErrorRef.current = null;
+      setCommandError(null);
       if (!isTauriRuntime()) {
-        setRuntimeStatus("healthy");
-        appendSystemLog("浏览器预览模式已模拟启动。");
-        onHealthy?.();
+        appendSystemLog("浏览器预览模式仅展示界面，无法执行原生 llama-server。");
+        startPendingRef.current = false;
+        setIsStartPending(false);
         return;
       }
 
-      setRuntimeStatus("starting");
+      setSnapshot((current) => ({ ...current, status: "starting", lastError: null }));
       appendSystemLog("正在启动 llama-server...");
-
       try {
-        const snapshot = await startLlama(config);
-        setRuntimeStatus(snapshot.status);
-        setRuntimeMetrics(snapshot.metrics);
-        mergeLogs(snapshot.logs);
-        appendSystemLog(`进程已启动${snapshot.pid ? `，PID ${snapshot.pid}` : ""}。`);
-        void pollUntilHealthy(config.port);
+        const next = await startLlama(config);
+        if (generation !== generationRef.current) return;
+        applySnapshot(next);
+        appendSystemLog(`进程已启动${next.pid ? `，PID ${next.pid}` : ""}。`);
+        if (next.pid !== null) startHealthPoll(generation);
       } catch (error) {
-        setRuntimeStatus("failed");
-        appendSystemLog(error instanceof Error ? error.message : String(error));
+        if (generation !== generationRef.current) return;
+        const normalized = normalizeCommandError(error);
+        const message = normalized.message;
+        setCommandError(normalized);
+        setSnapshot((current) => ({ ...current, status: "failed", lastError: message }));
+        appendSystemLog(message);
+      } finally {
+        startPendingRef.current = false;
+        setIsStartPending(false);
       }
     },
-    [appendSystemLog, mergeLogs, pollUntilHealthy, onHealthy],
+    [appendSystemLog, applySnapshot, startHealthPoll, stopHealthPoll],
   );
 
   const handleStop = useCallback(async () => {
+    stopHealthPoll();
+    const generation = generationRef.current;
     if (!isTauriRuntime()) {
-      setRuntimeStatus("stopped");
+      setSnapshot({ ...idleSnapshot, status: "stopped" });
       appendSystemLog("浏览器预览模式已停止。");
       return;
     }
-
-    stopHealthPoll();
-    setRuntimeStatus("stopping");
+    setSnapshot((current) => ({ ...current, status: "stopping" }));
     try {
-      const snapshot = await stopLlama();
-      setRuntimeStatus(snapshot.status);
-      setRuntimeMetrics(snapshot.metrics);
-      mergeLogs(snapshot.logs);
+      const next = await stopLlama();
+      if (generation !== generationRef.current) return;
+      applySnapshot(next);
+      setCommandError(null);
       appendSystemLog("llama-server 已停止。");
     } catch (error) {
-      setRuntimeStatus("failed");
-      appendSystemLog(error instanceof Error ? error.message : String(error));
+      if (generation !== generationRef.current) return;
+      const normalized = normalizeCommandError(error);
+      const message = normalized.message;
+      setCommandError(normalized);
+      setSnapshot((current) => ({ ...current, status: "failed", lastError: message }));
+      appendSystemLog(message);
     }
-  }, [appendSystemLog, mergeLogs, stopHealthPoll]);
+  }, [appendSystemLog, applySnapshot, stopHealthPoll]);
 
   return {
-    runtimeStatus,
-    runtimeMetrics,
+    snapshot,
+    runtimeStatus: snapshot.status,
+    runtimeMetrics: snapshot.metrics,
+    canStop: snapshot.pid !== null,
+    isStartPending,
+    commandError,
+    clearCommandError: () => setCommandError(null),
     handleStart,
     handleStop,
     stopHealthPoll,
