@@ -81,7 +81,11 @@ requireText(workflow, "release workflow", "release-infrastructure.mjs");
 requireText(workflow, "release workflow", 'GH_TOKEN: ${{ secrets.RELEASE_INFRASTRUCTURE_AUDIT_TOKEN }}');
 requireText(workflow, "release workflow", 'cargo audit --json --file src-tauri/Cargo.lock');
 requireText(workflow, "release workflow", 'verify-project-policy.mjs --audit');
-requireText(workflow, "release workflow", "taiki-e/install-action@v2.83.2");
+requireText(
+  workflow,
+  "release workflow",
+  "taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853",
+);
 requireText(workflow, "release workflow", "cargo-audit@0.22.2");
 requireText(workflow, "release workflow", "fallback: none");
 rejectText(workflow, "release workflow", "cargo install cargo-audit");
@@ -133,11 +137,17 @@ for (const flag of [
 }
 requireText(workflow, "release workflow", "prerelease: true");
 requireText(workflow, "release workflow", "prerelease: false");
-requireText(workflow, "release workflow", "uses: actions/upload-artifact@v4");
+requireText(
+  workflow,
+  "release workflow",
+  "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+);
 requireText(workflow, "release workflow", "if: inputs.mode == 'unsigned-artifact'");
 requireText(workflow, "release workflow", "if: inputs.mode == 'signed-release'");
 
-const releaseActionCount = workflow.match(/uses: softprops\/action-gh-release@v2/g)?.length ?? 0;
+const releaseActionCount = workflow.match(
+  /uses: softprops\/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65/g,
+)?.length ?? 0;
 if (releaseActionCount !== 2) {
   failures.push(`release workflow must have exactly two signed publish actions; found ${releaseActionCount}`);
 }

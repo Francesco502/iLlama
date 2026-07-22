@@ -16,6 +16,7 @@ test("exports side-effect-free RustSec and remote-resource policy helpers", () =
   assert.equal(typeof policy.verifyProjectPolicy, "function");
   assert.equal(typeof policy.validateTauriCsp, "function");
   assert.equal(typeof policy.validateWorkflowSecurityGates, "function");
+  assert.equal(typeof policy.validatePinnedWorkflowActions, "function");
 });
 
 const REQUIRED_TAURI_CSP = [
@@ -350,7 +351,7 @@ const FRESH_AUDIT_WORKFLOW = [
   "npm run check:project",
   "npm audit --audit-level=high",
   "npm audit --omit=dev",
-  "uses: taiki-e/install-action@v2.83.2",
+  "uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853",
   "tool: cargo-audit@0.22.2",
   "fallback: none",
   "cargo audit --json --file src-tauri/Cargo.lock",
@@ -368,7 +369,7 @@ for (const [label, omitted] of [
   ["release-policy tests", "npm run test:release-policy"],
   ["release-evidence tests", "npm run test:release-evidence"],
   ["production npm audit", "npm audit --omit=dev"],
-  ["pinned prebuilt installer", "uses: taiki-e/install-action@v2.83.2"],
+  ["pinned prebuilt installer", "uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853"],
   ["pinned cargo-audit version", "tool: cargo-audit@0.22.2"],
   ["disabled source fallback", "fallback: none"],
   ["fresh audit JSON", "cargo audit --json --file src-tauri/Cargo.lock"],
@@ -399,6 +400,20 @@ test("rejects unnecessary CI checks write permission", () => {
         FRESH_AUDIT_WORKFLOW,
       )
       .some((failure) => failure.includes("checks: write")),
+  );
+});
+
+test("requires every third-party workflow action to use a full commit SHA", () => {
+  const pinned = [
+    "- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7",
+    "- uses: ./local-action",
+    "- uses: docker://alpine:3.22",
+  ].join("\n");
+  assert.deepEqual(policy.validatePinnedWorkflowActions(pinned, "Release"), []);
+  assert.ok(
+    policy
+      .validatePinnedWorkflowActions("- uses: actions/checkout@v7", "Release")
+      .some((failure) => failure.includes("not pinned")),
   );
 });
 

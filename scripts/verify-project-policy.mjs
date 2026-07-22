@@ -250,7 +250,7 @@ export function validateWorkflowSecurityGates(ciWorkflow, releaseWorkflow) {
     "npm run check:project",
     "npm audit --audit-level=high",
     "npm audit --omit=dev",
-    "uses: taiki-e/install-action@v2.83.2",
+    "uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853",
     "tool: cargo-audit@0.22.2",
     "fallback: none",
     "cargo audit --json --file src-tauri/Cargo.lock",
@@ -271,6 +271,18 @@ export function validateWorkflowSecurityGates(ciWorkflow, releaseWorkflow) {
   }
   if (ciWorkflow.includes("checks: write")) {
     failures.push("CI workflow must not grant the unused checks: write permission.");
+  }
+  return failures;
+}
+
+export function validatePinnedWorkflowActions(workflow, label) {
+  const failures = [];
+  for (const match of workflow.matchAll(/^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)/gm)) {
+    const [, action, revision] = match;
+    if (action.startsWith("./") || action.startsWith("docker://")) continue;
+    if (!/^[0-9a-f]{40}$/.test(revision)) {
+      failures.push(`${label} workflow action ${action}@${revision} is not pinned to a full commit SHA.`);
+    }
   }
   return failures;
 }
@@ -641,6 +653,7 @@ export async function verifyProjectPolicy({
   const viteConfig = await read("vite.config.ts");
   const ciWorkflow = await read(".github/workflows/ci.yml");
   const releaseWorkflow = await read(".github/workflows/release.yml");
+  const releaseAcceptanceWorkflow = await read(".github/workflows/release-acceptance.yml");
 
   const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
   const cargoLockVersion = cargoLock.match(
@@ -688,6 +701,15 @@ export async function verifyProjectPolicy({
   }
   for (const workflowFailure of validateWorkflowSecurityGates(ciWorkflow, releaseWorkflow)) {
     fail(workflowFailure);
+  }
+  for (const [label, workflow] of [
+    ["CI", ciWorkflow],
+    ["Release", releaseWorkflow],
+    ["Release acceptance", releaseAcceptanceWorkflow],
+  ]) {
+    for (const workflowFailure of validatePinnedWorkflowActions(workflow, label)) {
+      fail(workflowFailure);
+    }
   }
   if (
     packageJson.scripts?.["test:release-policy"] !==

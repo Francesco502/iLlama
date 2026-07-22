@@ -108,7 +108,7 @@ jobs:
           done
 
       - name: Checkout the exact release tag
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
@@ -264,13 +264,13 @@ jobs:
           fi
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: rustfmt, clippy
 
@@ -281,7 +281,7 @@ jobs:
         run: npx playwright install chromium
 
       - name: Install pinned prebuilt cargo-audit
-        uses: taiki-e/install-action@v2.83.2
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: cargo-audit@0.22.2
           fallback: none
@@ -384,7 +384,7 @@ jobs:
 
       - name: Upload exact run-bound signed RC artifact
         if: inputs.tag == 'v3.2.0-rc.1'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: signed-rc-${{ env.TAGGED_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -393,7 +393,7 @@ jobs:
 
       - name: Publish release candidate
         if: inputs.tag == 'v3.2.0-rc.1'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v3.2.0-rc.1
           name: iLlama 3.2.0 RC 1
@@ -407,7 +407,7 @@ jobs:
 
       - name: Publish final release
         if: inputs.tag == 'v3.2.0'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v3.2.0
           name: iLlama 3.2.0
@@ -436,7 +436,7 @@ jobs:
 
     steps:
       - name: Checkout the exact tag
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
@@ -450,12 +450,12 @@ jobs:
           [[ "$(node -p 'require("./package.json").version')" == "3.2.0" ]]
           [[ "$(uname -m)" == "arm64" ]]
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: rustfmt, clippy
 
@@ -474,7 +474,7 @@ jobs:
           node scripts/lib/portable-checksum.mjs verify "$DMG.sha256"
 
       - name: Upload unsigned workflow artifact only
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: iLlama-3.2.0-unsigned-aarch64-${{ inputs.tag }}
           if-no-files-found: error
