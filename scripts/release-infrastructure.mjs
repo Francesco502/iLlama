@@ -397,36 +397,61 @@ async function performAudit(options, { api }) {
       protectedBranches: environment.deployment_branch_policy?.protected_branches === true,
     };
 
-    const expectedReviewerIds = options.reviewerIds.length > 0
-      ? options.reviewerIds
-      : report.environment.reviewers.length > 0
-        ? []
-        : [null];
+    const expectedReviewerIds = options.reviewerIds;
     for (const reviewerId of expectedReviewerIds) {
-      const present = reviewerId === null
-        ? false
-        : report.environment.reviewers.some(({ id }) => id === reviewerId);
+      const present = report.environment.reviewers.some(
+        ({ id, type }) => id === reviewerId && type === "User",
+      );
       if (!present) {
         report.findings.push(
           finding(
-            reviewerId === null
-              ? "environment-reviewers"
-              : `environment-reviewer:${reviewerId}`,
+            `environment-reviewer:${reviewerId}`,
             "missing",
-            reviewerId === null
-              ? "The protected environment has no required reviewer."
-              : `Environment reviewer ID ${reviewerId} is missing.`,
+            `Environment user reviewer ID ${reviewerId} is missing.`,
           ),
         );
       }
     }
 
-    if (!report.environment.preventSelfReview) {
+    if (report.environment.reviewers.length === 0) {
       report.findings.push(
         finding(
-          "environment-reviewers:prevent-self-review",
+          "environment-reviewers",
+          "missing",
+          "The protected environment has no required reviewer.",
+        ),
+      );
+    }
+
+    if (report.environment.reviewers.length > 1) {
+      report.findings.push(
+        finding(
+          "environment-reviewers:single-maintainer",
           "misconfigured",
-          "The protected environment must prevent reviewers from approving their own deployment.",
+          "The protected environment must have exactly one maintainer reviewer.",
+        ),
+      );
+    }
+
+    if (
+      report.environment.reviewers.length === 1 &&
+      report.environment.reviewers[0].type !== "User"
+    ) {
+      report.findings.push(
+        finding(
+          "environment-reviewers:user",
+          "misconfigured",
+          "The sole protected-environment reviewer must be an individual GitHub user, not a team.",
+        ),
+      );
+    }
+
+    if (report.environment.preventSelfReview) {
+      report.findings.push(
+        finding(
+          "environment-reviewers:self-approval",
+          "misconfigured",
+          "The single maintainer must be allowed to approve their own release deployment.",
         ),
       );
     }
@@ -608,18 +633,12 @@ async function performAudit(options, { api }) {
       );
     }
     const reviews = report.branchProtection.pullRequestReviews;
-    if (
-      !reviews ||
-      reviews.required_approving_review_count < 1 ||
-      !reviews.dismiss_stale_reviews ||
-      !reviews.require_code_owner_reviews ||
-      !reviews.require_last_push_approval
-    ) {
+    if (reviews) {
       report.findings.push(
         finding(
           "branch-protection:reviews",
           "misconfigured",
-          "Main must require a code-owner approval, stale-review dismissal, and last-push approval.",
+          "Single-maintainer main protection must rely on strict required checks without an independent PR approval requirement.",
         ),
       );
     }
@@ -641,12 +660,12 @@ async function performAudit(options, { api }) {
         ),
       );
     }
-    if (!enabled(branchProtection.required_conversation_resolution)) {
+    if (enabled(branchProtection.required_conversation_resolution)) {
       report.findings.push(
         finding(
           "branch-protection:conversation-resolution",
           "misconfigured",
-          "Main must require conversation resolution before merging.",
+          "Personal-project main protection must not require review-conversation resolution.",
         ),
       );
     }
@@ -945,10 +964,6 @@ export async function auditInfrastructure(options, adapters) {
   return (await performAudit(options, adapters)).report;
 }
 
-function existingReviewerPayload(environment) {
-  return reviewersFromEnvironment(environment).map(({ id, type }) => ({ id, type }));
-}
-
 function mergeActorRestrictions(current) {
   return current
     ? {
@@ -993,7 +1008,6 @@ function branchProtectionPayload(current, requiredChecks) {
   }
   checks.sort((left, right) => left.context.localeCompare(right.context));
 
-  const reviews = current?.required_pull_request_reviews ?? {};
   return {
     allow_deletions: false,
     allow_force_pushes: false,
@@ -1001,19 +1015,9 @@ function branchProtectionPayload(current, requiredChecks) {
     block_creations: enabled(current?.block_creations),
     enforce_admins: true,
     lock_branch: enabled(current?.lock_branch),
-    required_conversation_resolution: true,
+    required_conversation_resolution: false,
     required_linear_history: enabled(current?.required_linear_history),
-    required_pull_request_reviews: {
-      bypass_pull_request_allowances: { apps: [], teams: [], users: [] },
-      dismissal_restrictions: mergeActorRestrictions(reviews.dismissal_restrictions),
-      dismiss_stale_reviews: true,
-      require_code_owner_reviews: true,
-      require_last_push_approval: true,
-      required_approving_review_count: Math.max(
-        1,
-        Number(reviews.required_approving_review_count ?? 0),
-      ),
-    },
+    required_pull_request_reviews: null,
     required_status_checks: {
       checks,
       contexts,
@@ -1026,8 +1030,8 @@ function branchProtectionPayload(current, requiredChecks) {
 }
 
 function validateApplyOptions(options) {
-  if (!Array.isArray(options.reviewerIds) || options.reviewerIds.length === 0) {
-    throw new Error("--apply requires at least one explicit --reviewer-id.");
+  if (!Array.isArray(options.reviewerIds) || options.reviewerIds.length !== 1) {
+    throw new Error("--apply requires exactly one explicit --reviewer-id for the maintainer.");
   }
   if (!Array.isArray(options.requiredChecks) || options.requiredChecks.length === 0) {
     throw new Error("--apply requires explicit --required-check names.");
@@ -1060,22 +1064,17 @@ function planApply(options, report, source) {
     );
   }
 
-  const existingReviewers = existingReviewerPayload(environment);
-  const desiredReviewers = [...existingReviewers];
-  for (const reviewerId of options.reviewerIds) {
-    if (!desiredReviewers.some(({ id }) => id === reviewerId)) {
-      desiredReviewers.push({ id: reviewerId, type: "User" });
-    }
-  }
-  desiredReviewers.sort((left, right) => left.id - right.id);
+  const existingReviewerIds = reviewersFromEnvironment(environment)
+    .map(({ id }) => id)
+    .sort((left, right) => left - right);
+  const desiredReviewers = options.reviewerIds.map((id) => ({ id, type: "User" }));
+  const desiredReviewerIds = desiredReviewers.map(({ id }) => id);
   const needsEnvironmentUpdate =
     !environment ||
     environment.can_admins_bypass !== false ||
     environment.deployment_branch_policy?.custom_branch_policies !== true ||
-    reviewerRuleFromEnvironment(environment)?.prevent_self_review !== true ||
-    options.reviewerIds.some(
-      (reviewerId) => !existingReviewers.some(({ id }) => id === reviewerId),
-    );
+    reviewerRuleFromEnvironment(environment)?.prevent_self_review !== false ||
+    JSON.stringify(existingReviewerIds) !== JSON.stringify(desiredReviewerIds);
   if (needsEnvironmentUpdate) {
     operations.push({
       body: {
@@ -1084,7 +1083,7 @@ function planApply(options, report, source) {
           custom_branch_policies: true,
           protected_branches: false,
         },
-        prevent_self_review: true,
+        prevent_self_review: false,
         reviewers: desiredReviewers,
         wait_timer: waitTimerFromEnvironment(environment),
       },
@@ -1290,7 +1289,7 @@ function helpText() {
     "",
     "Default mode performs a read-only gh api audit.",
     "  --json                    Emit a stable JSON report",
-    "  --reviewer-id <id>        Required GitHub user ID (repeatable)",
+    "  --reviewer-id <id>        Sole maintainer GitHub user ID (exactly one for apply)",
     "  --required-check <name>   Additional protected check; canonical CI checks are always required",
     "  --apply                   Preview safe environment/protection changes",
     "  --confirm-apply           Execute the --apply preview",

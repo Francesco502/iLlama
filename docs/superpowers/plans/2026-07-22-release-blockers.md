@@ -129,7 +129,7 @@
 - Test: `scripts/tests/release-infrastructure.test.mjs`
 
 **Interfaces:**
-- `release-infrastructure.mjs` defaults to read-only audit; `--apply` creates/updates `macos-release`, required reviewers/tag restrictions, and main branch protection, but never prints or invents secrets. It requires self-review prevention, no PR-review bypass actors, and canonical checks bound to GitHub Actions App ID 15368. It reports the exact missing secret names and blocks release until all six Apple credentials plus the separate read-only infrastructure-audit token exist.
+- `release-infrastructure.mjs` defaults to read-only audit; `--apply` creates/updates `macos-release`, the sole self-approving maintainer/tag restrictions, and main branch protection, but never prints or invents secrets. It requires strict canonical checks bound to GitHub Actions App ID 15368 without an unavailable independent PR approval. It reports the exact missing secret names and blocks release until all six Apple credentials plus the separate read-only infrastructure-audit token exist.
 - RustSec review records every allowed advisory ID, target reachability, release relevance, mitigation, owner, and re-review condition.
 
 - [ ] Write failing tests for infrastructure audit output and fail-closed behavior when environment, reviewers, branch protection, workflow, tags, push CI, any of six Apple credentials, or the separate audit token are absent.
