@@ -68,6 +68,10 @@ operator may use `node scripts/verify-project-policy.mjs --live-rustsec` instead
 - [ ] Confirm settings, tray choice, and log dock layout survive restart
 - [ ] Confirm corrupt settings recover with a timestamped backup
 - [ ] Complete the full keyboard flow at 1000x680 and 1280x720
+  on a dedicated Mac without simultaneous human input. GitHub-hosted macOS
+  runners gate the packaged WebView/IPC runtime through the deep runner; their
+  System Events injection is not accepted as a substitute for physical-keyboard
+  activation evidence.
 
 ## Executable external client
 

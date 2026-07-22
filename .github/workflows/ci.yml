@@ -69,7 +69,7 @@ jobs:
       - run: npm run test:ui
 
   tauri-contract:
-    name: Packaged Tauri WebView + IPC acceptance (macOS 15)
+    name: Packaged Tauri WebView + IPC runtime acceptance (macOS 15)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -80,7 +80,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - run: npm ci
       - run: npm run test:native-controller
-      - run: npm run test:tauri
+      - run: npm run test:tauri -- --surface deep-runner
 
   rust:
     name: Rust unit and integration contracts (${{ matrix.os }})

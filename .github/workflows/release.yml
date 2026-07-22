@@ -294,7 +294,7 @@ jobs:
           npm run test:release-policy
           npm run test:release-evidence
           npm run check:project
-          npm run test:tauri
+          npm run test:tauri -- --surface deep-runner
           npm audit --audit-level=high
           npm audit --omit=dev
           cargo audit --json --file src-tauri/Cargo.lock > "$RUNNER_TEMP/cargo-audit.json"

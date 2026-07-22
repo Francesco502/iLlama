@@ -34,7 +34,7 @@ export const DEFAULT_REQUIRED_CHECKS = Object.freeze([
   "Frontend (macos-latest)",
   "Frontend (windows-latest)",
   "Browser UI and accessibility (test-only fixtures; no native runtime)",
-  "Packaged Tauri WebView + IPC acceptance (macOS 15)",
+  "Packaged Tauri WebView + IPC runtime acceptance (macOS 15)",
   "Rust unit and integration contracts (ubuntu-latest)",
   "Rust unit and integration contracts (macos-latest)",
   "Rust unit and integration contracts (windows-latest)",
