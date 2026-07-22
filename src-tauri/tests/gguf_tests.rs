@@ -2,7 +2,7 @@ use illama_lib::gguf::{inspect_gguf, GgufStatus};
 use std::{fs, io::Write};
 
 #[test]
-fn oversized_primitive_arrays_are_invalid_when_tensor_structure_cannot_be_verified() {
+fn oversized_primitive_arrays_are_limited_when_the_inspection_budget_is_exceeded() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("large-array.gguf");
     let mut bytes = Vec::new();
@@ -23,12 +23,13 @@ fn oversized_primitive_arrays_are_invalid_when_tensor_structure_cannot_be_verifi
 
     let inspection = inspect_gguf(&path);
 
-    assert_eq!(inspection.status, GgufStatus::Invalid);
+    assert_eq!(inspection.status, GgufStatus::Limited);
+    assert_eq!(inspection.metadata.unwrap().version, 3);
     assert!(inspection.warning.unwrap().contains("budget"));
 }
 
 #[test]
-fn oversized_string_arrays_are_invalid_when_tensor_structure_cannot_be_verified() {
+fn oversized_string_arrays_are_limited_when_the_inspection_budget_is_exceeded() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("large-string-array.gguf");
     let mut bytes = header(3, 1, 1);
@@ -44,8 +45,49 @@ fn oversized_string_arrays_are_invalid_when_tensor_structure_cannot_be_verified(
 
     let inspection = inspect_gguf(&path);
 
-    assert_eq!(inspection.status, GgufStatus::Invalid);
+    assert_eq!(inspection.status, GgufStatus::Limited);
+    assert_eq!(inspection.metadata.unwrap().version, 3);
     assert!(inspection.warning.unwrap().contains("element budget"));
+}
+
+#[test]
+fn unknown_metadata_value_types_are_limited_after_a_valid_header() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("unknown-metadata-type.gguf");
+    let mut bytes = header(3, 1, 1);
+    write_string(&mut bytes, "future.metadata");
+    bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+    append_f32_tensor(&mut bytes, "weight", &[2], &[0; 8]);
+    fs::write(&path, bytes).unwrap();
+
+    let inspection = inspect_gguf(&path);
+
+    assert_eq!(inspection.status, GgufStatus::Limited);
+    assert_eq!(inspection.metadata.unwrap().version, 3);
+    assert!(inspection
+        .warning
+        .unwrap()
+        .contains("unsupported value type"));
+}
+
+#[test]
+fn metadata_entry_count_above_the_inspection_budget_is_limited() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("many-metadata-entries.gguf");
+    let mut bytes = header(3, 1, 513);
+    for index in 0..513 {
+        write_string(&mut bytes, &format!("test.entry.{index}"));
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.push(0);
+    }
+    append_f32_tensor(&mut bytes, "weight", &[2], &[0; 8]);
+    fs::write(&path, bytes).unwrap();
+
+    let inspection = inspect_gguf(&path);
+
+    assert_eq!(inspection.status, GgufStatus::Limited);
+    assert_eq!(inspection.metadata.unwrap().version, 3);
+    assert!(inspection.warning.unwrap().contains("inspection limit"));
 }
 
 #[test]

@@ -109,17 +109,27 @@ pub fn inspect_gguf(path: &Path) -> GgufInspection {
         if let Err(error) =
             read_metadata_entry(&mut file, &mut metadata, &mut alignment, &mut budget)
         {
-            return invalid_inspection(format!(
-                "GGUF tensor structure cannot be verified after metadata parsing stopped: {}",
-                parse_error_message(error)
-            ));
+            return match error {
+                ParseError::Limited(message) => GgufInspection {
+                    status: GgufStatus::Limited,
+                    metadata: Some(metadata),
+                    warning: Some(message),
+                },
+                ParseError::Invalid(message) => invalid_inspection(format!(
+                    "GGUF tensor structure cannot be verified after metadata parsing stopped: {message}"
+                )),
+            };
         }
     }
 
     if metadata_count > MAX_INSPECTED_METADATA_ENTRIES {
-        return invalid_inspection(format!(
-            "GGUF tensor structure cannot be verified because metadata exceeds the inspection limit of {MAX_INSPECTED_METADATA_ENTRIES} entries"
-        ));
+        return GgufInspection {
+            status: GgufStatus::Limited,
+            metadata: Some(metadata),
+            warning: Some(format!(
+                "GGUF metadata exceeds the inspection limit of {MAX_INSPECTED_METADATA_ENTRIES} entries"
+            )),
+        };
     }
 
     if alignment == 0 || !alignment.is_multiple_of(8) {
@@ -147,12 +157,6 @@ fn inspection_from_parse_error(error: ParseError, metadata: GgufMetadata) -> Ggu
             warning: Some(message),
         },
         ParseError::Invalid(message) => invalid_inspection(message),
-    }
-}
-
-fn parse_error_message(error: ParseError) -> String {
-    match error {
-        ParseError::Limited(message) | ParseError::Invalid(message) => message,
     }
 }
 

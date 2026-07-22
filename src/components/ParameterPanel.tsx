@@ -2,6 +2,7 @@ import { FileSearch, Settings2, HelpCircle } from "lucide-react";
 import { useId } from "react";
 import { builtInProfiles, resolveModelContextLimit } from "../lib/parameterSchema";
 import type { ParameterPresetSource, ParameterPresetSourceId } from "../lib/parameterPresets";
+import type { ServerCapabilities } from "../api/tauri";
 import type { ParameterProfile, PrometheusHintsConfig, StartupParameters, ValidationResult } from "../types/domain";
 
 interface ParameterPanelProps {
@@ -23,7 +24,10 @@ interface ParameterPanelProps {
   onPrometheusHintsChange: (next: PrometheusHintsConfig) => void;
   onProfileChange: (id: ParameterProfile["id"]) => void;
   onParametersChange: (parameters: StartupParameters) => void;
+  serverCapabilities?: ServerCapabilities | null;
 }
+
+const MMAP_SERVER_DEFAULT = true;
 
 export function ParameterPanel({
   profile, parameters, modelContextLength, port, onPortChange,
@@ -36,7 +40,7 @@ export function ParameterPanel({
   appliedParameterPresetName,
   onParameterPresetSourceChange,
   onPrometheusHintsChange,
-  onProfileChange, onParametersChange,
+  onProfileChange, onParametersChange, serverCapabilities = null,
 }: ParameterPanelProps) {
   function update<K extends keyof StartupParameters>(key: K, value: StartupParameters[K]) {
     onParametersChange({ ...parameters, [key]: value });
@@ -44,6 +48,11 @@ export function ParameterPanel({
   const modelContextLimit = resolveModelContextLimit(modelContextLength);
   const customMode = profile.id === "custom";
   const mmprojEnabled = Boolean(parameters.mmprojPath?.trim());
+  const supports = (flag: string) =>
+    serverCapabilities === null || serverCapabilities.supportedFlags.includes(flag);
+  const targetMmap = !parameters.mmap;
+  const mmapCanToggle = targetMmap === MMAP_SERVER_DEFAULT
+    || supports(targetMmap ? "--mmap" : "--no-mmap");
 
   return (
     <section className="panel">
@@ -155,18 +164,29 @@ export function ParameterPanel({
             onChange={(v) => update("threads", parseAutoNumber(v))}
             tooltip="指定运行模型所使用的 CPU 线程数。'auto' 表示自动决定最佳线程数。"
             presets={[{ label: "自动", value: "auto" }]}
+            disabled={!supports("--threads")}
+          />
+          <TextField
+            label="Batch 线程数"
+            value={String(parameters.threadsBatch)}
+            onChange={(v) => update("threadsBatch", parseAutoNumber(v))}
+            tooltip="指定 Prompt batch 阶段的 CPU 线程数。'auto' 表示由 llama-server 自动决定。"
+            presets={[{ label: "自动", value: "auto" }]}
+            disabled={!supports("--threads-batch")}
           />
           <NumberField
             label="Batch size"
             value={parameters.batchSize}
             onChange={(v) => update("batchSize", v)}
             tooltip="单次评估的批大小（Batch Size），用于控制 Prompt 处理吞吐量。"
+            disabled={!supports("--batch-size")}
           />
           <NumberField
             label="Micro-batch"
             value={parameters.ubatchSize}
             onChange={(v) => update("ubatchSize", v)}
             tooltip="微批次大小，用于控制指令流的微批大小，通常与 Batch size 相同。"
+            disabled={!supports("--ubatch-size")}
           />
           <SelectField
             label="Flash Attention"
@@ -178,12 +198,14 @@ export function ParameterPanel({
             ]}
             onChange={(v) => update("flashAttention", v as StartupParameters["flashAttention"])}
             tooltip="使用闪光注意力机制（Flash Attention），能有效降低显存并加速推理。"
+            disabled={!supports("--flash-attn")}
           />
           <NumberField
             label="空闲休眠（秒）"
             value={parameters.idleSleepSeconds}
             onChange={(v) => update("idleSleepSeconds", Math.max(0, v))}
             tooltip="llama-server 空闲多少秒后自动进入休眠状态，以释放 CPU/GPU 资源（0 表示禁用）。"
+            disabled={!supports("--sleep-idle-seconds")}
           />
         </div>
 
@@ -193,8 +215,8 @@ export function ParameterPanel({
           <small>{mmprojCandidates.length > 0 ? `发现 ${mmprojCandidates.length} 个 projector` : "可选"}</small>
         </div>
         <div className="mmproj-row">
-          <TextField label="mmproj 文件" value={parameters.mmprojPath ?? ""} onChange={(v) => update("mmprojPath", v.trim().length > 0 ? v : null)} />
-          <button className="ghost-button compact" type="button" onClick={onSelectMmproj}>
+          <TextField label="mmproj 文件" value={parameters.mmprojPath ?? ""} onChange={(v) => update("mmprojPath", v.trim().length > 0 ? v : null)} disabled={!supports("--mmproj")} />
+          <button className="ghost-button compact" type="button" onClick={onSelectMmproj} disabled={!supports("--mmproj")}>
             <FileSearch size={14} /> 选择
           </button>
         </div>
@@ -220,7 +242,7 @@ export function ParameterPanel({
             未启用 projector；纯文本模型可忽略，图片输入需要对应 mmproj。
           </div>
         )}
-        <ToggleRow label="Projector GPU offload" enabled={parameters.mmprojOffload} onToggle={() => update("mmprojOffload", !parameters.mmprojOffload)} />
+        <ToggleRow label="Projector GPU offload" enabled={parameters.mmprojOffload} onToggle={() => update("mmprojOffload", !parameters.mmprojOffload)} disabled={!supports("--no-mmproj-offload")} />
       </div>
 
       <div className="toggle-list">
@@ -229,12 +251,14 @@ export function ParameterPanel({
           enabled={parameters.mmap}
           onToggle={() => update("mmap", !parameters.mmap)}
           tooltip="允许模型文件通过内存映射 (mmap) 异步加载，缩短启动时间并允许多进程共享。"
+          disabled={!mmapCanToggle}
         />
         <ToggleRow
           label="Metrics 监控"
           enabled={parameters.metrics}
           onToggle={() => update("metrics", !parameters.metrics)}
           tooltip="启用 Prometheus 指标监控接口，方便外接监控仪表盘查看性能。"
+          disabled={!supports("--metrics")}
         />
         <ToggleRow
           label="mlock 锁定内存"
@@ -242,6 +266,7 @@ export function ParameterPanel({
           warning
           onToggle={() => update("mlock", !parameters.mlock)}
           tooltip="强制将模型数据锁定在物理内存中，防止其被交换到 Swap 分区，可保证推理延迟稳定，但需要物理内存充足。"
+          disabled={!supports("--mlock")}
         />
       </div>
 
@@ -389,16 +414,18 @@ function NumberField({
   value,
   onChange,
   tooltip,
+  disabled = false,
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
   tooltip?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="field">
       <FieldLabel label={label} tooltip={tooltip} />
-      <input aria-label={label} inputMode="numeric" min={0} onChange={(e) => onChange(Number.parseInt(e.target.value || "0", 10))} type="number" value={value} />
+      <input aria-label={label} disabled={disabled} inputMode="numeric" min={0} onChange={(e) => onChange(Number.parseInt(e.target.value || "0", 10))} type="number" value={value} />
     </label>
   );
 }
@@ -409,18 +436,20 @@ function TextField({
   onChange,
   tooltip,
   presets,
+  disabled = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   tooltip?: string;
   presets?: { label: string; value: string }[];
+  disabled?: boolean;
 }) {
   return (
     <label className="field">
       <FieldLabel label={label} tooltip={tooltip} />
       <div className="input-with-presets">
-        <input aria-label={label} onChange={(e) => onChange(e.target.value)} value={value} />
+        <input aria-label={label} disabled={disabled} onChange={(e) => onChange(e.target.value)} value={value} />
         {presets && presets.length > 0 && (
           <div className="preset-badges">
             {presets.map((preset) => (
@@ -430,6 +459,7 @@ function TextField({
                 className="preset-badge"
                 onClick={() => onChange(preset.value)}
                 data-active={value === preset.value}
+                disabled={disabled}
               >
                 {preset.label}
               </button>
@@ -447,17 +477,19 @@ function SelectField({
   options,
   onChange,
   tooltip,
+  disabled = false,
 }: {
   label: string;
   value: string;
   options: { value: string; label: string }[];
   onChange: (v: string) => void;
   tooltip?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="field">
       <FieldLabel label={label} tooltip={tooltip} />
-      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+      <select aria-label={label} disabled={disabled} value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
       </select>
     </label>
@@ -470,12 +502,14 @@ function ToggleRow({
   warning,
   onToggle,
   tooltip,
+  disabled = false,
 }: {
   label: string;
   enabled: boolean;
   warning?: boolean;
   onToggle?: () => void;
   tooltip?: string;
+  disabled?: boolean;
 }) {
   const descriptionId = useId();
   return (
@@ -486,6 +520,7 @@ function ToggleRow({
       role="switch"
       aria-checked={enabled}
       aria-describedby={tooltip ? descriptionId : undefined}
+      disabled={disabled}
       onClick={onToggle}
     >
       <span>{label}</span>

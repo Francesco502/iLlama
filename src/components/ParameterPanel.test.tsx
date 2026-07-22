@@ -223,4 +223,109 @@ describe("ParameterPanel", () => {
 
     expect(screen.getByText("Projector 已启用，图片会随请求发送给 llama-server。")).toBeInTheDocument();
   });
+
+  it("disables advanced controls for flags unsupported by the selected server", async () => {
+    const user = userEvent.setup();
+    const profile = getProfileById("custom");
+    render(
+      <ParameterPanel
+        profile={profile}
+        parameters={profile.parameters}
+        port={8080}
+        onPortChange={vi.fn()}
+        prometheusHints={emptyPrometheusHintsConfig()}
+        parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+        parameterPresetSources={parameterPresetSources}
+        appliedParameterPresetName="Llama 通用"
+        onParameterPresetSourceChange={vi.fn()}
+        onPrometheusHintsChange={vi.fn()}
+        onParametersChange={vi.fn()}
+        onProfileChange={vi.fn()}
+        serverCapabilities={{
+          binaryPath: "/bin/llama-server",
+          versionText: "fixture",
+          supportedFlags: ["--model", "--host", "--port"],
+          status: "compatible",
+          warnings: [],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByText("高级启动参数"));
+    expect(screen.getByLabelText("Flash Attention")).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /Metrics 监控/ })).toBeDisabled();
+    expect(screen.getByLabelText("Batch 线程数")).toBeInTheDocument();
+  });
+
+  it("allows mmap to be disabled when the server exposes only --no-mmap", async () => {
+    const user = userEvent.setup();
+    const profile = getProfileById("custom");
+    const onParametersChange = vi.fn();
+    render(
+      <ParameterPanel
+        profile={profile}
+        parameters={{ ...profile.parameters, mmap: true }}
+        port={8080}
+        onPortChange={vi.fn()}
+        prometheusHints={emptyPrometheusHintsConfig()}
+        parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+        parameterPresetSources={parameterPresetSources}
+        appliedParameterPresetName="Llama 通用"
+        onParameterPresetSourceChange={vi.fn()}
+        onPrometheusHintsChange={vi.fn()}
+        onParametersChange={onParametersChange}
+        onProfileChange={vi.fn()}
+        serverCapabilities={{
+          binaryPath: "/bin/llama-server",
+          versionText: "fixture",
+          supportedFlags: ["--model", "--host", "--port", "--no-mmap"],
+          status: "compatible",
+          warnings: [],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByText("高级启动参数"));
+    const mmap = screen.getByRole("switch", { name: /内存映射 mmap/ });
+    expect(mmap).toBeEnabled();
+
+    await user.click(mmap);
+    expect(onParametersChange).toHaveBeenCalledWith({ ...profile.parameters, mmap: false });
+  });
+
+  it("allows mmap to return to the enabled server default without claiming --mmap support", async () => {
+    const user = userEvent.setup();
+    const profile = getProfileById("custom");
+    const onParametersChange = vi.fn();
+    render(
+      <ParameterPanel
+        profile={profile}
+        parameters={{ ...profile.parameters, mmap: false }}
+        port={8080}
+        onPortChange={vi.fn()}
+        prometheusHints={emptyPrometheusHintsConfig()}
+        parameterPresetSourceId={MODEL_FAMILY_AUTO_PRESET_SOURCE_ID}
+        parameterPresetSources={parameterPresetSources}
+        appliedParameterPresetName="Llama 通用"
+        onParameterPresetSourceChange={vi.fn()}
+        onPrometheusHintsChange={vi.fn()}
+        onParametersChange={onParametersChange}
+        onProfileChange={vi.fn()}
+        serverCapabilities={{
+          binaryPath: "/bin/llama-server",
+          versionText: "fixture",
+          supportedFlags: ["--model", "--host", "--port", "--no-mmap"],
+          status: "compatible",
+          warnings: [],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByText("高级启动参数"));
+    const mmap = screen.getByRole("switch", { name: /内存映射 mmap/ });
+    expect(mmap).toBeEnabled();
+
+    await user.click(mmap);
+    expect(onParametersChange).toHaveBeenCalledWith({ ...profile.parameters, mmap: true });
+  });
 });
