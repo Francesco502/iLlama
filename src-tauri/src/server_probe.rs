@@ -241,8 +241,20 @@ fn configure_probe_process(command: &mut Command) {
 fn configure_probe_process(_command: &mut Command) {}
 
 fn terminate_probe_tree(child: &mut Child) {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
+    if terminate_linux_probe_tree(child) {
+        return;
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
     unsafe {
+        let _ = libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe {
+        // Fall back to the original group kill if procfs was unavailable or the
+        // session leader did not reap its children promptly.
         let _ = libc::kill(-(child.id() as i32), libc::SIGKILL);
     }
 
@@ -259,6 +271,69 @@ fn terminate_probe_tree(child: &mut Child) {
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[cfg(target_os = "linux")]
+fn terminate_linux_probe_tree(child: &mut Child) -> bool {
+    let Ok(leader_pid) = i32::try_from(child.id()) else {
+        return false;
+    };
+
+    // Killing the complete process group in one operation can orphan zombie
+    // grandchildren: the shell dies before it can reap the background command.
+    // Freeze the group, kill descendants first, then resume the session leader
+    // so its normal `wait` path can reap them before we fall back to SIGKILL.
+    unsafe {
+        if libc::kill(-leader_pid, libc::SIGSTOP) == -1 {
+            return false;
+        }
+    }
+
+    let descendants = linux_descendant_pids(leader_pid);
+    for descendant in descendants.into_iter().rev() {
+        unsafe {
+            let _ = libc::kill(descendant, libc::SIGKILL);
+        }
+    }
+    unsafe {
+        let _ = libc::kill(leader_pid, libc::SIGCONT);
+    }
+
+    let deadline = Instant::now() + PROBE_READER_DRAIN_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let _ = child.wait();
+                return true;
+            }
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            _ => return false,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_descendant_pids(root_pid: i32) -> Vec<i32> {
+    let mut descendants = Vec::new();
+    let mut pending = vec![root_pid];
+
+    while let Some(parent_pid) = pending.pop() {
+        let children_path = format!("/proc/{parent_pid}/task/{parent_pid}/children");
+        let Ok(children) = std::fs::read_to_string(children_path) else {
+            continue;
+        };
+        for child_pid in children
+            .split_whitespace()
+            .filter_map(|value| value.parse::<i32>().ok())
+        {
+            descendants.push(child_pid);
+            pending.push(child_pid);
+        }
+    }
+
+    descendants
 }
 
 fn first_non_empty_line(output: &str) -> Option<String> {
