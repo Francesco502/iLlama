@@ -77,7 +77,7 @@ test("normal App keyboard gate fails explicitly without Accessibility and has no
   assert.doesNotMatch(source, /dispatchEvent\s*\(|\.click\s*\(/);
   assert.match(source, /key code 48/);
   assert.match(source, /pressAndObserve\(36, "Enter"/);
-  assert.match(source, /pressAndObserve\(49, " "/);
+  assert.match(source, /pressAndObserve\(\s*49,\s*" "/);
   assert.match(source, /keystroke/);
 });
 
@@ -118,6 +118,57 @@ test("normal App stop activation uses a bounded trusted-Space fallback and waits
   });
 
   assert.deepEqual(actions, ["key code 36", "key code 49"]);
+  assert.equal(result.activationKey, " ");
+  assert.equal(result.milestone.name, "keyboard-stop-llama");
+});
+
+test("normal App stop fallback restores focus before sending trusted Space", async () => {
+  const runNonce = "stop-space-refocus";
+  const output = { stdout: "", stderr: "" };
+  let sequence = 0;
+  let focusedTarget = "stop";
+  const actions = [];
+  const emit = (marker) => {
+    output.stderr += `[normal-acceptance] ${JSON.stringify({
+      runNonce,
+      sequence: ++sequence,
+      ...marker,
+    })}\n`;
+  };
+
+  const result = await activateNormalTargetWithTrustedKeyboard({
+    appPid: 4321,
+    target: "stop",
+    expectedMilestone: "keyboard-stop-llama",
+    child: { exitCode: null, signalCode: null },
+    output,
+    runNonce,
+    deadline: Date.now() + 250,
+    afterSequence: 0,
+    fallbackDelayMs: 10,
+    refocusTarget: async (target) => {
+      actions.push(`refocus:${target}`);
+      focusedTarget = target;
+      emit({ kind: "focus", target });
+    },
+    execute: (lines) => {
+      const action = lines.at(-2);
+      actions.push(action);
+      if (action === "key code 36") {
+        emit({ kind: "input", target: "stop", key: "Enter", isTrusted: true });
+        focusedTarget = "body";
+        emit({ kind: "focus", target: "body" });
+      } else if (action === "key code 49") {
+        emit({ kind: "input", target: focusedTarget, key: " ", isTrusted: true });
+        if (focusedTarget === "stop") {
+          emit({ kind: "milestone", name: "keyboard-stop-llama" });
+        }
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+
+  assert.deepEqual(actions, ["key code 36", "refocus:stop", "key code 49"]);
   assert.equal(result.activationKey, " ");
   assert.equal(result.milestone.name, "keyboard-stop-llama");
 });

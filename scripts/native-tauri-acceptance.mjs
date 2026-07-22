@@ -1012,15 +1012,16 @@ export async function activateNormalTargetWithTrustedKeyboard({
   deadline,
   afterSequence = 0,
   fallbackDelayMs = NORMAL_ACTIVATION_FALLBACK_TIMEOUT_MS,
+  refocusTarget = null,
   execute = executeAppleScript,
 }) {
-  const pressAndObserve = async (keyCode, key, sequence) => {
+  const pressAndObserve = async (keyCode, key, sequence, observationDeadline = deadline) => {
     runAppleScriptForProcess(appPid, [`key code ${keyCode}`], execute);
     return waitForNormalMarker({
       child,
       output,
       runNonce,
-      deadline,
+      deadline: observationDeadline,
       afterSequence: sequence,
       predicate: (candidate) =>
         candidate.kind === "input" && candidate.target === target && candidate.key === key &&
@@ -1050,7 +1051,13 @@ export async function activateNormalTargetWithTrustedKeyboard({
     return { sequence: enter.sequence, activationKey: "Enter", milestone: enterMilestone };
   }
 
-  const space = await pressAndObserve(49, " ", enter.sequence);
+  if (refocusTarget) await refocusTarget(target);
+  const space = await pressAndObserve(
+    49,
+    " ",
+    enter.sequence,
+    Math.min(deadline, Date.now() + fallbackDelayMs),
+  );
   const spaceMilestone = await waitForNormalMarker({
     child,
     output,
@@ -1131,6 +1138,7 @@ export async function driveNormalAppWithTrustedKeyboard({
       runNonce,
       deadline,
       afterSequence: inputSequence,
+      refocusTarget: focusTarget,
       execute,
     });
     inputSequence = result.sequence;
