@@ -102,7 +102,8 @@ operator may use `node scripts/verify-project-policy.mjs --live-rustsec` instead
   `macos-release`, exactly one self-approving maintainer reviewer, exact tag
   restrictions, all six Apple
   credential names plus `RELEASE_INFRASTRUCTURE_AUDIT_TOKEN`, branch protection,
-  no independent PR-approval requirement, exact required checks
+  no independent PR-approval or review-conversation-resolution requirement,
+  exact required checks
   bound to the GitHub Actions App (`app_id` 15368), default-branch workflow
   files, candidate tag/SHA,
   compare-API proof that the candidate belongs to protected `main`, a successful

@@ -43,8 +43,9 @@ must require exactly one maintainer reviewer, allow that maintainer to approve
 their own deployment, and allow only the two exact release tags. Branch
 protection on `main` must require the exact cross-platform CI check names and
 strictly require the branch to be current, without an unavailable independent
-PR approval. Administrators must not be allowed to bypass the environment
-protection rules.
+PR approval or review-conversation resolution gate. Automated checks protect
+the personal-project workflow without requiring another reviewer.
+Administrators must not be allowed to bypass the environment protection rules.
 
 The release job accepts numeric run IDs, never free-form success assertions. It
 checks that CI and protected acceptance runs succeeded for the same repository,
@@ -150,7 +151,7 @@ fail closed.
 default. Given an explicit repository, candidate SHA, exact tag, and optional
 maintainer reviewer ID, it checks `main`, `macos-release`, exact tag policies,
 secret names, exactly one self-approving maintainer, branch protection without
-an independent PR approval requirement,
+an independent PR approval or review-conversation resolution requirement,
 required checks bound to the GitHub Actions App (`app_id` 15368), workflow files
 on the default branch, CI,
 tag binding, protected-`main` ancestry, and workflow-dispatch acceptance

@@ -397,28 +397,30 @@ async function performAudit(options, { api }) {
       protectedBranches: environment.deployment_branch_policy?.protected_branches === true,
     };
 
-    const expectedReviewerIds = options.reviewerIds.length > 0
-      ? options.reviewerIds
-      : report.environment.reviewers.length === 1
-        ? report.environment.reviewers.map(({ id }) => id)
-        : [null];
+    const expectedReviewerIds = options.reviewerIds;
     for (const reviewerId of expectedReviewerIds) {
-      const present = reviewerId === null
-        ? false
-        : report.environment.reviewers.some(({ id }) => id === reviewerId);
+      const present = report.environment.reviewers.some(
+        ({ id, type }) => id === reviewerId && type === "User",
+      );
       if (!present) {
         report.findings.push(
           finding(
-            reviewerId === null
-              ? "environment-reviewers"
-              : `environment-reviewer:${reviewerId}`,
+            `environment-reviewer:${reviewerId}`,
             "missing",
-            reviewerId === null
-              ? "The protected environment has no required reviewer."
-              : `Environment reviewer ID ${reviewerId} is missing.`,
+            `Environment user reviewer ID ${reviewerId} is missing.`,
           ),
         );
       }
+    }
+
+    if (report.environment.reviewers.length === 0) {
+      report.findings.push(
+        finding(
+          "environment-reviewers",
+          "missing",
+          "The protected environment has no required reviewer.",
+        ),
+      );
     }
 
     if (report.environment.reviewers.length > 1) {
@@ -427,6 +429,19 @@ async function performAudit(options, { api }) {
           "environment-reviewers:single-maintainer",
           "misconfigured",
           "The protected environment must have exactly one maintainer reviewer.",
+        ),
+      );
+    }
+
+    if (
+      report.environment.reviewers.length === 1 &&
+      report.environment.reviewers[0].type !== "User"
+    ) {
+      report.findings.push(
+        finding(
+          "environment-reviewers:user",
+          "misconfigured",
+          "The sole protected-environment reviewer must be an individual GitHub user, not a team.",
         ),
       );
     }
@@ -645,12 +660,12 @@ async function performAudit(options, { api }) {
         ),
       );
     }
-    if (!enabled(branchProtection.required_conversation_resolution)) {
+    if (enabled(branchProtection.required_conversation_resolution)) {
       report.findings.push(
         finding(
           "branch-protection:conversation-resolution",
           "misconfigured",
-          "Main must require conversation resolution before merging.",
+          "Personal-project main protection must not require review-conversation resolution.",
         ),
       );
     }
@@ -1000,7 +1015,7 @@ function branchProtectionPayload(current, requiredChecks) {
     block_creations: enabled(current?.block_creations),
     enforce_admins: true,
     lock_branch: enabled(current?.lock_branch),
-    required_conversation_resolution: true,
+    required_conversation_resolution: false,
     required_linear_history: enabled(current?.required_linear_history),
     required_pull_request_reviews: null,
     required_status_checks: {

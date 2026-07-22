@@ -195,7 +195,7 @@ function happyRoutes() {
         allow_deletions: { enabled: false },
         allow_force_pushes: { enabled: false },
         enforce_admins: { enabled: true },
-        required_conversation_resolution: { enabled: true },
+        required_conversation_resolution: { enabled: false },
         required_pull_request_reviews: null,
         required_status_checks: {
           checks: REQUIRED_CHECKS.map((context) => ({
@@ -365,10 +365,34 @@ test("multiple environment reviewers violate the single-maintainer policy", asyn
     { reviewer: { id: 202, login: "second-reviewer" }, type: "User" },
   );
 
-  const report = await infrastructure.auditInfrastructure(AUDIT_OPTIONS, createApi(routes));
+  const report = await infrastructure.auditInfrastructure(
+    { ...AUDIT_OPTIONS, reviewerIds: [] },
+    createApi(routes),
+  );
 
   assert.equal(report.status, "misconfigured");
   assertFinding(report, "environment-reviewers:single-maintainer", "misconfigured");
+  assert.equal(
+    report.findings.some(({ code }) => code === "environment-reviewers"),
+    false,
+  );
+});
+
+test("the sole environment reviewer must be an individual user", async () => {
+  const routes = happyRoutes();
+  routes.get(
+    `GET /repos/${REPOSITORY}/environments/macos-release`,
+  ).protection_rules[0].reviewers = [
+    { reviewer: { id: 101, slug: "release-team" }, type: "Team" },
+  ];
+
+  const report = await infrastructure.auditInfrastructure(
+    { ...AUDIT_OPTIONS, reviewerIds: [] },
+    createApi(routes),
+  );
+
+  assert.equal(report.status, "misconfigured");
+  assertFinding(report, "environment-reviewers:user", "misconfigured");
 });
 
 test("single-maintainer release environment must allow reviewer self-approval", async () => {
@@ -412,6 +436,18 @@ test("independent PR approval requirements make single-maintainer protection mis
 
   assert.equal(report.status, "misconfigured");
   assertFinding(report, "branch-protection:reviews", "misconfigured");
+});
+
+test("review-conversation resolution must not block personal-project merges", async () => {
+  const routes = happyRoutes();
+  routes.get(
+    `GET /repos/${REPOSITORY}/branches/main/protection`,
+  ).required_conversation_resolution = { enabled: true };
+
+  const report = await infrastructure.auditInfrastructure(AUDIT_OPTIONS, createApi(routes));
+
+  assert.equal(report.status, "misconfigured");
+  assertFinding(report, "branch-protection:conversation-resolution", "misconfigured");
 });
 
 for (const [label, mutate] of [
@@ -975,6 +1011,7 @@ test("confirmed apply configures single-maintainer approval, tag rules, and bran
       .every(({ app_id: appId }) => appId === infrastructure.GITHUB_ACTIONS_APP_ID),
   );
   assert.equal(protectionUpdate.body.required_pull_request_reviews, null);
+  assert.equal(protectionUpdate.body.required_conversation_resolution, false);
   assert.deepEqual(
     new Set(
       protectionUpdate.body.required_status_checks.checks.map(({ context }) => context),
