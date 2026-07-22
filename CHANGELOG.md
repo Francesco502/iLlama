@@ -18,6 +18,7 @@
 - Make macOS Apple Silicon the only formal 3.2.0 distribution target; retain Windows build, test, and preview support without Release assets.
 - Keep `llama-server` external: no bundled sidecar and no binary download.
 - Replace automatic tag publishing with a manual protected workflow for `v3.2.0-rc.1` and `v3.2.0`.
+- Publish an ad-hoc signed, unnotarized Apple Silicon DMG on GitHub Releases without requiring an Apple Developer account; when macOS blocks first launch, use Finder 右键 → “打开”.
 
 ### Fixed
 
@@ -26,7 +27,7 @@
 - Prevent concurrent setting, tray, and debounced UI writes from overwriting one another.
 - Reject invalid GGUF files and omit optional flags unsupported by the selected server.
 - Preserve the last runtime snapshot across temporary IPC polling failures and retain logs after abnormal exits.
-- Block formal publication when signing, notarization, staple, Gatekeeper, checksum, real-GGUF, external-client, or clean-Mac gates are missing.
+- Keep checksum, real-GGUF, executable-client, mounted-DMG launch, dependency, and cross-platform CI gates while removing Developer ID, notarization, staple, and Gatekeeper approval requirements.
 
 ## v3.1.0 - 2026-06-18
 

@@ -2,15 +2,7 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const REQUIRED_ENVIRONMENT_SECRETS = Object.freeze([
-  "APPLE_CERTIFICATE",
-  "APPLE_CERTIFICATE_PASSWORD",
-  "APPLE_KEYCHAIN_PASSWORD",
-  "APPLE_ID",
-  "APPLE_APP_SPECIFIC_PASSWORD",
-  "APPLE_TEAM_ID",
-  "RELEASE_INFRASTRUCTURE_AUDIT_TOKEN",
-]);
+export const REQUIRED_ENVIRONMENT_SECRETS = Object.freeze([]);
 
 export const REQUIRED_ACCEPTANCE_INPUTS = Object.freeze([
   "ACCEPTANCE_LLAMA_SERVER_PATHS",
@@ -879,9 +871,7 @@ async function performAudit(options, { api }) {
     );
     artifactsByRun.set(run.id, response?.artifacts ?? []);
   }
-  const requiredEvidenceTypes = options.candidateTag === "v3.2.0"
-    ? ["llama-matrix", "external-client", "clean-mac"]
-    : ["llama-matrix", "external-client"];
+  const requiredEvidenceTypes = ["llama-matrix", "external-client"];
   for (const evidenceType of requiredEvidenceTypes) {
     let accepted = null;
     const suspicious = [];

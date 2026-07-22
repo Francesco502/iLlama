@@ -157,10 +157,10 @@ src-tauri/binaries/
 ## 3.2.0 发布边界
 
 - `v3.2.0-rc.1` 与 `v3.2.0` 只通过 GitHub Actions 的手动、受保护发布环境创建。
-- 正式 DMG 必须在 Apple Silicon runner 上完成 Developer ID 签名、Apple 公证、staple、Gatekeeper 检查和 SHA-256 校验。
-- 缺少任一签名或公证凭据会直接阻断发布，不会降级为未签名 Release。
-- unsigned 模式仅生成保留 7 天的手动 workflow artifact，不创建 GitHub Release。
-- 最终版还必须完成真实 GGUF 全链路、至少一个版本明确的外部客户端，以及干净 Apple Silicon Mac 验收。
+- GitHub Release 提供 Apple Silicon DMG 和 SHA-256；DMG 使用 ad-hoc 签名，但不使用 Developer ID，也不进行 Apple 公证。
+- macOS 首次阻止启动时，在 Finder 中右键 `iLlama.app`，选择“打开”，再在确认框中选择“打开”。
+- 发布仍必须完成跨平台 CI、真实 GGUF 全链路、可执行 `curl` 客户端验证、DMG 校验、只读挂载和打包应用启动检查。
+- Release 不包含 Windows 安装包，也不内置或下载 `llama-server`。
 
 完整步骤见 [发布清单](docs/release-checklist.md) 和 [3.2.0 发布说明](docs/releases/v3.2.0.md)。
 

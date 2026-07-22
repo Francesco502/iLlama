@@ -1165,7 +1165,7 @@ test("clean-Mac manifest cross-checks linked reports, RC files, and every raw si
   );
 });
 
-test("workflows prohibit secret JSON and require ephemeral mounted-app curl evidence with exact run binding", () => {
+test("workflows publish an unnotarized DMG with exact CI and application evidence binding", () => {
   const acceptance = readText(".github/workflows/release-acceptance.yml");
   const release = readText(".github/workflows/release.yml");
   const releaseMacos = readText("scripts/release-macos.mjs");
@@ -1175,48 +1175,31 @@ test("workflows prohibit secret JSON and require ephemeral mounted-app curl evid
   assert.doesNotMatch(acceptance, /gh release download v3\.2\.0-rc\.1/);
   assert.doesNotMatch(acceptance, /\$\{[^}\n]+,,\}/);
   assert.doesNotMatch(release, /\$\{[^}\n]+,,\}/);
-  assert.match(acceptance, /ACCEPTED_RC_SHA256" =~ \^\[0-9a-f\]\{64\}\$/);
-  assert.match(release, /ACCEPTED_RC_SHA256" =~ \^\[0-9a-f\]\{64\}\$/);
-  assert.match(acceptance, /runs-on:\s*macos-15/);
+  assert.doesNotMatch(acceptance, /clean-mac|APPLE_|notarytool|stapler|spctl/);
+  assert.doesNotMatch(release, /signed-release|unsigned-artifact|APPLE_|notarytool|stapler|spctl --assess/);
+  assert.match(acceptance, /options: \[llama-matrix, external-client\]/);
+  assert.match(acceptance, /runs-on:\s*\[self-hosted, macOS, ARM64\]/);
   assert.match(acceptance, /\[\[ "\$\(uname -m\)" == "arm64" \]\]/);
   for (const pattern of [
-    /hdiutil attach/,
-    /-readonly/,
-    /-nobrowse/,
-    /codesign --verify --deep --strict --verbose=2/,
-    /TeamIdentifier/,
-    /flags=.*runtime/,
-    /stapler validate/,
-    /spctl --assess --type execute/,
-    /spctl --status/,
-    /assessments enabled/,
     /native-tauri-acceptance\.mjs/,
     /external-client-curl\.mjs/,
-    /create-clean-mac-report\.mjs/,
-    /--launch-via-open/,
-    /hdiutil detach/,
-    /if:\s*always\(\)/,
     /GITHUB_RUN_ID/,
     /GITHUB_RUN_ATTEMPT/,
     /GITHUB_REPOSITORY/,
-    /gh run download "\$RC_RELEASE_RUN_ID"/,
-    /signed-rc-\$\{TAGGED_SHA\}-\$\{RC_RELEASE_RUN_ID\}-\$\{RC_RUN_ATTEMPT\}/,
   ]) assert.match(acceptance, pattern);
-  assert.match(acceptance, /select\(\."mount-point" == \$mount\)/);
-  assert.match(acceptance, /ATTACH_PLIST=.*hdiutil-attach\.plist/);
-  for (const name of cleanCheckNames) {
-    assert.match(acceptance, new RegExp(name));
-    assert.match(release, new RegExp(name));
-    assert.match(verifier, new RegExp(name));
-  }
-
-  assert.match(release, /rc_release_run_id/);
+  assert.match(release, /hdiutil attach/);
+  assert.match(release, /realpathSync/);
+  assert.match(release, /-readonly/);
+  assert.match(release, /-nobrowse/);
+  assert.match(release, /codesign --verify --deep --strict --verbose=2/);
+  assert.match(release, /CFBundleExecutable/);
+  assert.match(release, /Signature=adhoc/);
+  assert.match(release, /open -n "\$APP_PATH"/);
+  assert.match(release, /hdiutil detach/);
+  assert.match(release, /select\(\."mount-point" == \$mount\)/);
   assert.doesNotMatch(release, /verify_run\(\)/);
   assert.doesNotMatch(release, /attempt="\$\(verify_run/);
   assert.match(release, /validate-workflow-run\.mjs/);
-  assert.match(acceptance, /validate-workflow-run\.mjs/);
-  assert.match(release, /rc-artifact-provenance\.mjs/);
-  assert.match(release, /signed-rc-\$\{\{ env\.TAGGED_SHA \}\}-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
   assert.match(release, /workflow_dispatch/);
   assert.match(release, /validate-release-evidence\.mjs/);
   assert.match(release, /--workflow-path/);
@@ -1227,9 +1210,10 @@ test("workflows prohibit secret JSON and require ephemeral mounted-app curl evid
   assert.match(release, /portable-checksum\.mjs verify/);
   assert.doesNotMatch(release, /--artifact "curl=\/usr\/bin\/curl"/);
   assert.match(releaseMacos, /portable-checksum\.mjs["'],\s*["']create/);
+  assert.match(releaseMacos, /Unnotarized GitHub Release DMG built at/);
   assert.match(verifier, /release-acceptance\.yml/);
   assert.match(verifier, /EXTERNAL_CLIENT_RESULT/);
-  assert.match(verifier, /spctl --status/);
+  assert.match(verifier, /Signature=adhoc/);
   const verifierResult = spawnSync(
     process.execPath,
     [resolve("scripts/verify-release-workflow.mjs")],
@@ -1261,19 +1245,16 @@ test("protected release jobs require the dispatch ref to equal the selected tag"
     releaseWorkflow,
     /validate_run "\$CI_RUN_ID" "\.github\/workflows\/ci\.yml" push "\$RELEASE_TAG"/,
   );
-  assert.match(
-    releaseWorkflow,
-    /"\$RC_RELEASE_RUN_ID" "\.github\/workflows\/release\.yml" workflow_dispatch v3\.2\.0-rc\.1/,
-  );
+  assert.match(releaseWorkflow, /verify_evidence llama-matrix "\$LLAMA_MATRIX_RUN_ID"/);
+  assert.match(releaseWorkflow, /verify_evidence external-client "\$EXTERNAL_CLIENT_RUN_ID"/);
 
   const releaseDocs = [
     readText("docs/release-strategy.md"),
     readText("docs/release-checklist.md"),
   ].join("\n");
-  assert.match(releaseDocs, /Use workflow from[^\n]*corresponding tag/i);
-  assert.match(releaseDocs, /gh workflow run[^\n]*--ref <tag> -f tag=<tag>/);
-  assert.match(releaseDocs, /head_branch[^\n]*selected tag/i);
-  assert.match(releaseDocs, /main[^\n]*same SHA[^\n]*(?:not|cannot|invalid)/i);
+  assert.match(releaseDocs, /exact tag|对应 tag/i);
+  assert.match(releaseDocs, /tag-bound|tag ref|tag 绑定/i);
+  assert.match(releaseDocs, /main[^\n]*(?:cannot|不能|不可)/i);
 });
 
 test("signed packaging staples the verified app before creating and notarizing the DMG", async (t) => {
