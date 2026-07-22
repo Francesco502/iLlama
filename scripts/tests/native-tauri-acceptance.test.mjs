@@ -13,6 +13,7 @@ import {
   cleanupOwnedProcessTree,
   cleanupTrackedLaunchServicesApp,
   createOwnedProcessTreeTracker,
+  activateNormalTargetWithTrustedKeyboard,
   driveNormalAppWithTrustedKeyboard,
   identifyNewLaunchServicesApp,
   installLaunchServicesEnvironment,
@@ -75,8 +76,69 @@ test("normal App keyboard gate fails explicitly without Accessibility and has no
   const source = readFileSync(resolve("scripts/native-tauri-acceptance.mjs"), "utf8");
   assert.doesNotMatch(source, /dispatchEvent\s*\(|\.click\s*\(/);
   assert.match(source, /key code 48/);
-  assert.match(source, /key code 36/);
+  assert.match(source, /pressAndObserve\(36, "Enter"/);
+  assert.match(source, /pressAndObserve\(49, " "/);
   assert.match(source, /keystroke/);
+});
+
+test("normal App stop activation uses a bounded trusted-Space fallback and waits for the real stop milestone", async () => {
+  const runNonce = "stop-space-fallback";
+  const output = { stdout: "", stderr: "" };
+  let sequence = 0;
+  const actions = [];
+  const emit = (marker) => {
+    output.stderr += `[normal-acceptance] ${JSON.stringify({
+      runNonce,
+      sequence: ++sequence,
+      ...marker,
+    })}\n`;
+  };
+
+  const result = await activateNormalTargetWithTrustedKeyboard({
+    appPid: 4321,
+    target: "stop",
+    expectedMilestone: "keyboard-stop-llama",
+    child: { exitCode: null, signalCode: null },
+    output,
+    runNonce,
+    deadline: Date.now() + 2_000,
+    afterSequence: 0,
+    fallbackDelayMs: 10,
+    execute: (lines) => {
+      const action = lines.at(-2);
+      actions.push(action);
+      if (action === "key code 36") {
+        emit({ kind: "input", target: "stop", key: "Enter", isTrusted: true });
+      } else if (action === "key code 49") {
+        emit({ kind: "input", target: "stop", key: " ", isTrusted: true });
+        emit({ kind: "milestone", name: "keyboard-stop-llama" });
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+
+  assert.deepEqual(actions, ["key code 36", "key code 49"]);
+  assert.equal(result.activationKey, " ");
+  assert.equal(result.milestone.name, "keyboard-stop-llama");
+});
+
+test("normal App report accepts trusted Space for stop only with real stopped-runtime evidence", () => {
+  const report = validNormalReport();
+  report.trustedInputs.at(-1).key = " ";
+  assert.doesNotThrow(() => validateNormalAppKeyboardReport(report, {
+    ...expected(),
+    surface: "normal-app",
+    viewportWidth: 1000,
+    viewportHeight: 680,
+  }));
+
+  report.stop.pid = 1234;
+  assert.throws(() => validateNormalAppKeyboardReport(report, {
+    ...expected(),
+    surface: "normal-app",
+    viewportWidth: 1000,
+    viewportHeight: 680,
+  }), /retained a PID/);
 });
 
 test("normal App retries trusted Tab when one key press produces no focus transition", async () => {

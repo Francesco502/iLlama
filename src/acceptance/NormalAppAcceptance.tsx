@@ -9,6 +9,7 @@ import {
   type ActiveLaunchSnapshot,
   type NativeAcceptanceConfig,
   type NormalAcceptanceObservation,
+  type RuntimeSnapshot,
   type SettingsIsolationEvidence,
 } from "../api/tauri";
 
@@ -125,6 +126,12 @@ const REQUIRED_LAYOUT_TARGETS = [
   "stop",
 ];
 const CHAT_PROMPT = "slow cancellation acceptance";
+
+export function isStoppedRuntimeSnapshot(
+  snapshot: Pick<RuntimeSnapshot, "status" | "pid" | "activeLaunch">,
+) {
+  return snapshot.status === "stopped" && snapshot.pid === null && snapshot.activeLaunch === null;
+}
 
 export function NormalAppAcceptance({ config }: { config: NativeAcceptanceConfig }) {
   const started = useRef(false);
@@ -411,7 +418,7 @@ function createCoordinator(
       if (
         report.steps.length === 15 &&
         (pressedTargets.get("stop") ?? 0) >= 1 &&
-        snapshot.status === "stopped" && snapshot.pid === null && snapshot.activeLaunch === null &&
+        isStoppedRuntimeSnapshot(snapshot) &&
         report.activeLaunch
       ) {
         report.stop = { pid: null, activeLaunch: null, portReachable: false };

@@ -31,6 +31,7 @@ const BOOTSTRAP_TIMEOUT_MS = 30_000;
 const DEFAULT_TERMINATION_GRACE_MS = 2_000;
 const DEFAULT_KILL_GRACE_MS = 5_000;
 const NORMAL_FOCUS_TRANSITION_TIMEOUT_MS = 250;
+const NORMAL_ACTIVATION_FALLBACK_TIMEOUT_MS = 5_000;
 const RUNNER_STARTED_MARKER = "[native-acceptance] runner-started";
 const NORMAL_MARKER_PREFIX = "[normal-acceptance] ";
 const NORMAL_CHAT_PROMPT = "slow cancellation acceptance";
@@ -1001,6 +1002,67 @@ export function assertTrustedKeyboardEnvironment(execute = executeAppleScript) {
   }
 }
 
+export async function activateNormalTargetWithTrustedKeyboard({
+  appPid,
+  target,
+  expectedMilestone = null,
+  child,
+  output,
+  runNonce,
+  deadline,
+  afterSequence = 0,
+  fallbackDelayMs = NORMAL_ACTIVATION_FALLBACK_TIMEOUT_MS,
+  execute = executeAppleScript,
+}) {
+  const pressAndObserve = async (keyCode, key, sequence) => {
+    runAppleScriptForProcess(appPid, [`key code ${keyCode}`], execute);
+    return waitForNormalMarker({
+      child,
+      output,
+      runNonce,
+      deadline,
+      afterSequence: sequence,
+      predicate: (candidate) =>
+        candidate.kind === "input" && candidate.target === target && candidate.key === key &&
+        candidate.isTrusted === true,
+      description: `trusted ${key === " " ? "Space" : key} activation for ${target}`,
+    });
+  };
+
+  const enter = await pressAndObserve(36, "Enter", afterSequence);
+  if (!expectedMilestone) {
+    return { sequence: enter.sequence, activationKey: "Enter", milestone: null };
+  }
+
+  const milestonePredicate = (marker) =>
+    marker.kind === "milestone" && marker.name === expectedMilestone;
+  const enterMilestone = await waitForNormalMarker({
+    child,
+    output,
+    runNonce,
+    deadline: Math.min(deadline, Date.now() + fallbackDelayMs),
+    afterSequence: enter.sequence,
+    predicate: milestonePredicate,
+    description: `normal App milestone ${expectedMilestone} after Enter`,
+    allowTimeout: true,
+  });
+  if (enterMilestone) {
+    return { sequence: enter.sequence, activationKey: "Enter", milestone: enterMilestone };
+  }
+
+  const space = await pressAndObserve(49, " ", enter.sequence);
+  const spaceMilestone = await waitForNormalMarker({
+    child,
+    output,
+    runNonce,
+    deadline,
+    afterSequence: space.sequence,
+    predicate: milestonePredicate,
+    description: `normal App milestone ${expectedMilestone} after Space`,
+  });
+  return { sequence: space.sequence, activationKey: " ", milestone: spaceMilestone };
+}
+
 export async function driveNormalAppWithTrustedKeyboard({
   appPid,
   child,
@@ -1059,20 +1121,20 @@ export async function driveNormalAppWithTrustedKeyboard({
       `trusted keyboard could not focus normal App target ${target}${bootstrapDiagnostics(output)}`,
     );
   };
-  const activate = async (target) => {
-    runAppleScriptForProcess(appPid, ["key code 36"], execute);
-    const marker = await waitForNormalMarker({
+  const activate = async (target, expectedMilestone = null) => {
+    const result = await activateNormalTargetWithTrustedKeyboard({
+      appPid,
+      target,
+      expectedMilestone,
       child,
       output,
       runNonce,
       deadline,
       afterSequence: inputSequence,
-      predicate: (candidate) =>
-        candidate.kind === "input" && candidate.target === target && candidate.key === "Enter" &&
-        candidate.isTrusted === true,
-      description: `trusted Enter activation for ${target}`,
+      execute,
     });
-    inputSequence = marker.sequence;
+    inputSequence = result.sequence;
+    return result;
   };
   const milestone = (name) => waitForNormalMarker({
     child,
@@ -1121,7 +1183,8 @@ export async function driveNormalAppWithTrustedKeyboard({
   await focusTarget("tab-run");
   await activate("tab-run");
   await focusTarget("stop");
-  await activate("stop");
+  await activate("stop", "keyboard-stop-llama");
+  await milestone("port-closed");
   await milestone("layout-no-overflow");
 }
 
