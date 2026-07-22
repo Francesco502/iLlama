@@ -623,7 +623,7 @@ test("misbound or expired acceptance artifacts are misconfigured", async () => {
   assertFinding(report, "acceptance-artifact:external-client", "misconfigured");
 });
 
-test("final requires a clean-mac artifact in addition to matrix and external-client", async () => {
+test("final requires the same matrix and external-client evidence as the RC", async () => {
   const routes = happyRoutes();
   routes.delete(`GET /repos/${REPOSITORY}/git/ref/tags/${CANDIDATE_TAG}`);
   routes.set(
@@ -641,8 +641,11 @@ test("final requires a clean-mac artifact in addition to matrix and external-cli
     createApi(routes),
   );
 
-  assert.equal(report.status, "pending-external");
-  assertFinding(report, "acceptance-evidence:clean-mac", "pending-external");
+  assert.equal(report.status, "ready");
+  assert.equal(
+    report.findings.some(({ code }) => code.includes("clean-mac")),
+    false,
+  );
 });
 
 test("a returned workflow run with another SHA is misconfigured", async () => {

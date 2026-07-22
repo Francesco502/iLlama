@@ -146,8 +146,8 @@ if (unsignedRelease) {
   console.warn(
     [
       "",
-      "Building an explicit unsigned macOS artifact because ILLAMA_UNSIGNED_RELEASE=1 is set.",
-      "The resulting DMG is a workflow artifact only; it must never be attached to a GitHub Release.",
+      "Building the unnotarized GitHub Release DMG because ILLAMA_UNSIGNED_RELEASE=1 is set.",
+      "Users must use Finder's Open context-menu action the first time macOS blocks launch.",
       "",
     ].join("\n"),
   );
@@ -210,12 +210,12 @@ if (unsignedRelease) {
   run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
   const assessment = capture("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]);
   if (assessment.ok) {
-    console.warn("Gatekeeper assessment unexpectedly passed for the unsigned release.");
+    console.warn("Gatekeeper assessment passed for the ad-hoc signed, unnotarized release.");
   } else {
-    console.warn("Gatekeeper assessment failed as expected for the unsigned/unnotarized release:");
+    console.warn("Gatekeeper assessment failed as expected for the unnotarized GitHub release:");
     console.warn(assessment.output.trim());
   }
-  console.warn(`Unsigned DMG built at: ${dmgPath}`);
+  console.warn(`Unnotarized GitHub Release DMG built at: ${dmgPath}`);
 } else {
   packageSignedMacRelease({
     appPath,
