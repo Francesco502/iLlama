@@ -1,5 +1,6 @@
 import type { ChatAttachment, ChatMessage } from "../types/chat";
 import type { SamplingParameters } from "../types/domain";
+import { buildLoopbackHttpUrl } from "./loopbackUrl";
 
 export interface ChatRequestMessage {
   role: ChatMessage["role"];
@@ -80,7 +81,7 @@ async function streamChatCompletionRequest({
 }: StreamChatOptions): Promise<void> {
   await assertImageInputSupported({ host, port, messages, signal });
 
-  const response = await fetch(`http://${host}:${port}/v1/chat/completions`, {
+  const response = await fetch(buildLoopbackHttpUrl(host, port, "/v1/chat/completions"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -155,7 +156,7 @@ async function completeChatCompletionRequest({
 }: ChatCompletionOptions): Promise<ChatCompletionMessage> {
   await assertImageInputSupported({ host, port, messages, signal });
 
-  const response = await fetch(`http://${host}:${port}/v1/chat/completions`, {
+  const response = await fetch(buildLoopbackHttpUrl(host, port, "/v1/chat/completions"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -228,7 +229,9 @@ async function fetchRuntimeCapabilities(
 ): Promise<RuntimeCapabilities> {
   const timed = createTimedSignal(signal, MODELS_REQUEST_TIMEOUT_MS, "模型能力检测超过 5 秒未完成。");
   try {
-    const response = await fetch(`http://${host}:${port}/v1/models`, { signal: timed.signal });
+    const response = await fetch(buildLoopbackHttpUrl(host, port, "/v1/models"), {
+      signal: timed.signal,
+    });
     if (!response.ok) {
       return { multimodal: null };
     }

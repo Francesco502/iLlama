@@ -309,6 +309,7 @@ export function SmokeChatComposer({
           <textarea
             ref={textareaRef}
             aria-label="输入消息"
+            data-native-acceptance-target="chat-input"
             disabled={disabled}
             placeholder={placeholder}
             rows={1}
@@ -320,7 +321,7 @@ export function SmokeChatComposer({
         </div>
       </div>
       {streaming ? (
-        <button type="button" className="chat-composer-send streaming" aria-label="取消生成" onClick={onCancel}>
+        <button type="button" className="chat-composer-send streaming" data-native-acceptance-target="cancel-stream" aria-label="取消生成" onClick={onCancel}>
           <Square size={16} />
         </button>
       ) : (

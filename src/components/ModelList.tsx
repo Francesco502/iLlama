@@ -74,6 +74,8 @@ export function ModelList({
               aria-disabled={invalid}
               aria-selected={selected}
               className="model-row"
+              data-native-acceptance-target={invalid ? undefined : "model-option"}
+              data-model-path={model.path}
               data-metadata-status={model.metadataStatus}
               data-selected={selected}
               disabled={invalid}

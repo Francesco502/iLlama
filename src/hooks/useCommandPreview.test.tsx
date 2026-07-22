@@ -71,6 +71,7 @@ describe("useCommandPreview", () => {
     expect(probeLlamaServer).toHaveBeenCalledTimes(1);
     expect(buildCommandSpec).toHaveBeenCalledTimes(1);
     expect(result.current.args).toEqual(["/bin/llama-server", "--ctx-size", "16384"]);
+    expect(result.current.capabilities).toEqual(capabilities);
 
     rerender({ next: { ...config, parameters: { ...config.parameters, ctxSize: 32768 } } });
     await act(async () => vi.advanceTimersByTimeAsync(COMMAND_PREVIEW_DEBOUNCE_MS));

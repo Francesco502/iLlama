@@ -546,6 +546,7 @@ export function App() {
           </button>
           <button
             className="start-button"
+            data-native-acceptance-target="start"
             type="button"
             disabled={
               canStop || isStartPending || isLaunchTransactionPending || !modelLaunchAssessment.allowed
@@ -609,7 +610,12 @@ export function App() {
                   <p>{commandError.message}</p>
                 </div>
                 <div className="settings-warning-actions">
-                  <button className="ghost-button" type="button" onClick={() => void handleRecoveryAction(commandError.recoveryAction)}>
+                  <button
+                    className="ghost-button"
+                    data-native-acceptance-target={commandError.recoveryAction === "changePort" ? "change-port" : undefined}
+                    type="button"
+                    onClick={() => void handleRecoveryAction(commandError.recoveryAction)}
+                  >
                     {recoveryActionLabel(commandError.recoveryAction)}
                   </button>
                   <button className="ghost-button" type="button" onClick={clearCommandError}>关闭</button>

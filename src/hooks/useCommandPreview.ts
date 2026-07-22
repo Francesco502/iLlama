@@ -13,6 +13,7 @@ export const COMMAND_PREVIEW_DEBOUNCE_MS = 300;
 interface CommandPreviewState {
   args: string[];
   warnings: string[];
+  capabilities: ServerCapabilities | null;
 }
 
 export function useCommandPreview(
@@ -22,6 +23,7 @@ export function useCommandPreview(
   const [preview, setPreview] = useState<CommandPreviewState>(() => ({
     args: runningInTauri ? [] : buildCommandPreview(config),
     warnings: [],
+    capabilities: null,
   }));
   const capabilityRef = useRef<{
     path: string;
@@ -30,16 +32,16 @@ export function useCommandPreview(
 
   useEffect(() => {
     if (!runningInTauri) {
-      setPreview({ args: buildCommandPreview(config), warnings: [] });
+      setPreview({ args: buildCommandPreview(config), warnings: [], capabilities: null });
       return;
     }
     if (!config.binaryPath || !config.modelPath) {
-      setPreview({ args: [], warnings: [] });
+      setPreview({ args: [], warnings: [], capabilities: null });
       return;
     }
 
     let cancelled = false;
-    setPreview({ args: [], warnings: ["正在根据 llama-server 能力生成命令预览…"] });
+    setPreview({ args: [], warnings: ["正在根据 llama-server 能力生成命令预览…"], capabilities: null });
     const timer = setTimeout(() => {
       const path = config.binaryPath!;
       if (capabilityRef.current?.path !== path) {
@@ -57,6 +59,7 @@ export function useCommandPreview(
             setPreview({
               args: [spec.executable, ...spec.args],
               warnings: spec.warnings,
+              capabilities: spec.capabilities,
             });
           }
         })
@@ -67,6 +70,7 @@ export function useCommandPreview(
               warnings: [
                 `命令预览探测失败：${normalizeCommandError(error).message}`,
               ],
+              capabilities: null,
             });
           }
         });

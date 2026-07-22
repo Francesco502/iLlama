@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main, master]
+    tags: ["v3.2.0*"]
   pull_request:
 
 jobs:
@@ -11,21 +12,30 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      checks: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
+      - name: Install pinned prebuilt cargo-audit
+        uses: taiki-e/install-action@v2.83.2
+        with:
+          tool: cargo-audit@0.22.2
+          fallback: none
+      - run: npm run test:release-policy
+      - run: npm run test:release-evidence
       - run: npm run check:project
       - run: npm audit --audit-level=high
-      - name: RustSec advisory audit
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: src-tauri
+      - run: npm audit --omit=dev
+      - name: Fresh RustSec audit and bounded-review comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo audit --json --file src-tauri/Cargo.lock > "$RUNNER_TEMP/cargo-audit.json"
+          node scripts/verify-project-policy.mjs --audit "$RUNNER_TEMP/cargo-audit.json"
 
   frontend:
     name: Frontend (${{ matrix.os }})
@@ -46,7 +56,7 @@ jobs:
       - run: npm run build
 
   ui:
-    name: Playwright UI and accessibility
+    name: Browser UI and accessibility (test-only fixtures; no native runtime)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -58,8 +68,22 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
 
+  tauri-contract:
+    name: Packaged Tauri WebView + IPC acceptance (macOS 15)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run test:native-controller
+      - run: npm run test:tauri
+
   rust:
-    name: Rust (${{ matrix.os }})
+    name: Rust unit and integration contracts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

@@ -35,7 +35,6 @@ export function useModelDirectoryScanning({
   setModels,
   selectedModelPath,
   setSelectedModelPath,
-  setStartupParameters,
 }: UseModelDirectoryScanningOptions): UseModelDirectoryScanningResult {
   const [scanning, setScanning] = useState(false);
   const requestSequenceRef = useRef(0);
@@ -118,7 +117,6 @@ export function useModelDirectoryScanning({
         setSelectedModelPath((selected) => pickSelectedModelPath(next, preferredModelPath ?? selected));
         return next;
       });
-      setStartupParameters((current) => ({ ...current, mmprojPath: null }));
 
       for (const path of uniquePaths) {
         const requestId = requestIds.get(path)!;
@@ -174,7 +172,6 @@ export function useModelDirectoryScanning({
       setDirectories,
       setModels,
       setSelectedModelPath,
-      setStartupParameters,
     ],
   );
 
@@ -201,7 +198,6 @@ export function useModelDirectoryScanning({
           setSelectedModelPath((currentSelected) => pickSelectedModelPath(merged, currentSelected));
           return merged;
         });
-        setStartupParameters((current) => ({ ...current, mmprojPath: null }));
         setDirectories((current) => upsertDirectory(current, {
           path,
           status: "ready",
@@ -230,7 +226,6 @@ export function useModelDirectoryScanning({
       setDirectories,
       setModels,
       setSelectedModelPath,
-      setStartupParameters,
     ],
   );
 

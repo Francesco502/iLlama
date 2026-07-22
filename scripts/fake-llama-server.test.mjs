@@ -151,3 +151,42 @@ test("reports a stable failure when the requested port is occupied", async (t) =
   assert.equal(code, 98);
   assert.match(stderr, /EADDRINUSE/);
 });
+
+test("acceptance control drives health down/up and slow SSE observes AbortController", async (t) => {
+  const child = launch({ FAKE_LLAMA_ACCEPTANCE_CONTROL: "1" });
+  t.after(() => stop(child));
+  const listening = await waitForJsonLine(child.stdout, "listening");
+  const endpoint = `http://127.0.0.1:${listening.port}`;
+
+  const down = await fetch(`${endpoint}/__illama_acceptance/health`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ healthy: false }),
+  });
+  assert.equal(down.status, 200);
+  assert.equal((await fetch(`${endpoint}/health`)).status, 503);
+
+  const up = await fetch(`${endpoint}/__illama_acceptance/health`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ healthy: true }),
+  });
+  assert.equal(up.status, 200);
+  assert.equal((await fetch(`${endpoint}/health`)).status, 200);
+
+  const controller = new AbortController();
+  const response = await fetch(`${endpoint}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      stream: true,
+      messages: [{ role: "user", content: "slow cancellation acceptance" }],
+    }),
+    signal: controller.signal,
+  });
+  const reader = response.body.getReader();
+  const first = await reader.read();
+  assert.equal(first.done, false);
+  controller.abort();
+  await assert.rejects(reader.read(), (error) => error?.name === "AbortError");
+});

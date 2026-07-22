@@ -153,6 +153,48 @@ export interface ModelScanResult {
   modelsFound: number;
 }
 
+export interface NativeAcceptanceConfig {
+  surface: "deep-runner" | "normal-app";
+  runNonce: string;
+  binaryPath: string;
+  modelPath: string;
+  modelDirectory: string;
+  reportPath: string;
+  occupiedPort: number;
+  preferredPort: number;
+  startupTimeoutMs: number;
+  chatTimeoutMs: number;
+  cancellationTimeoutMs: number;
+  fixtureControl: boolean;
+  externalClient: string | null;
+  viewportWidth: number;
+  viewportHeight: number;
+}
+
+export interface SettingsFileSnapshot {
+  exists: boolean;
+  byteLength: number;
+  sha256: string | null;
+}
+
+export interface SettingsIsolationEvidence {
+  mode: "in-memory";
+  path: string;
+  before: SettingsFileSnapshot;
+  after: SettingsFileSnapshot;
+  unchanged: boolean;
+}
+
+export interface NormalAcceptanceObservation {
+  sequence: number;
+  kind: "ready" | "focus" | "input" | "milestone" | "failure";
+  target?: string;
+  key?: string;
+  isTrusted?: true;
+  name?: string;
+  detail?: string;
+}
+
 export function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
 }
@@ -231,6 +273,32 @@ export async function checkHealth(host: string, port: number): Promise<HealthSta
 
 export async function findAvailablePort(host: string, preferred: number): Promise<number> {
   return invoke<number>("find_available_port_command", { host, preferred });
+}
+
+export async function nativeAcceptanceConfig(): Promise<NativeAcceptanceConfig | null> {
+  return invoke<NativeAcceptanceConfig | null>("native_acceptance_config_command");
+}
+
+export async function markNativeAcceptanceRunnerStarted(): Promise<void> {
+  return invoke<void>("native_acceptance_runner_started_command");
+}
+
+export async function reportNormalAcceptanceProgress(
+  observation: NormalAcceptanceObservation,
+): Promise<void> {
+  return invoke<void>("normal_acceptance_progress_command", { observation });
+}
+
+export async function nativeAcceptanceSettingsIsolation(): Promise<SettingsIsolationEvidence> {
+  return invoke<SettingsIsolationEvidence>("native_acceptance_settings_isolation_command");
+}
+
+export async function writeNativeAcceptanceReport(report: unknown): Promise<void> {
+  return invoke<void>("write_native_acceptance_report_command", { report });
+}
+
+export async function finishNativeAcceptance(report: unknown, exitCode: 0 | 1): Promise<void> {
+  return invoke<void>("finish_native_acceptance_command", { report, exitCode });
 }
 
 export async function setTrayEnabled(enabled: boolean): Promise<boolean> {

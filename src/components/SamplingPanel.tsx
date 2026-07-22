@@ -1,4 +1,5 @@
 import { ChevronDown, SlidersHorizontal, HelpCircle } from "lucide-react";
+import { useId } from "react";
 import { getAdaptiveSafetyFactor } from "../lib/contextBudget";
 import { calculateMaxOutputTokens } from "../lib/parameterSchema";
 import type { ParameterProfile, SamplingParameters } from "../types/domain";
@@ -13,15 +14,31 @@ interface SamplingPanelProps {
 }
 
 function FieldLabel({ label, tooltip }: { label: string; tooltip?: string }) {
+  const tooltipId = useId();
   if (!tooltip) {
     return <span>{label}</span>;
   }
   return (
     <span className="field-label-container">
       <span>{label}</span>
-      <span className="tooltip-wrapper" data-tooltip={tooltip} onClick={(e) => e.stopPropagation()}>
+      <span
+        className="tooltip-wrapper"
+        data-tooltip={tooltip}
+        role="button"
+        tabIndex={0}
+        aria-label={`${label}说明`}
+        aria-describedby={tooltipId}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
         <HelpCircle size={12} className="tooltip-icon" />
       </span>
+      <span className="visually-hidden" id={tooltipId} role="tooltip">{tooltip}</span>
     </span>
   );
 }
@@ -141,6 +158,7 @@ export function SamplingPanel({
           <label className="field">
             <FieldLabel label="随机种子（seed，留空为随机）" tooltip="指定随机数种子以获得可重复的输出结果。留空为随机。" />
             <input
+              aria-label="随机种子（seed，留空为随机）"
               inputMode="numeric"
               onChange={(event) => {
                 const text = event.target.value.trim();
@@ -158,6 +176,7 @@ export function SamplingPanel({
           <label className="field field-wide">
             <FieldLabel label="停用序列（每行一个，stop）" tooltip="遇到这些停用词序列时立即停止生成。每行输入一个。" />
             <textarea
+              aria-label="停用序列（每行一个，stop）"
               rows={3}
               spellCheck={false}
               value={stopJoined}
@@ -255,6 +274,7 @@ function NumberField({
     <label className="field">
       <FieldLabel label={label} tooltip={tooltip} />
       <input
+        aria-label={label}
         inputMode="decimal"
         max={max}
         min={min}

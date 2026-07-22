@@ -66,6 +66,7 @@ const requestedExitCode = nonNegativeInteger(process.env.FAKE_LLAMA_EXIT_CODE, 4
 const exitCode = Math.min(requestedExitCode, 255);
 let readyAt = Number.POSITIVE_INFINITY;
 let shuttingDown = false;
+let forcedHealth = null;
 
 function json(response, status, body) {
   const encoded = JSON.stringify(body);
@@ -78,7 +79,7 @@ function json(response, status, body) {
 }
 
 function healthy() {
-  return Date.now() >= readyAt;
+  return forcedHealth ?? Date.now() >= readyAt;
 }
 
 async function readJson(request) {
@@ -119,6 +120,25 @@ const server = http.createServer(async (request, response) => {
   }
 
   const url = new URL(request.url || "/", `http://${request.headers.host || host}`);
+  if (request.method === "POST" && url.pathname === "/__illama_acceptance/health") {
+    if (process.env.FAKE_LLAMA_ACCEPTANCE_CONTROL !== "1") {
+      json(response, 404, { error: { message: "not found" } });
+      return;
+    }
+    try {
+      const payload = await readJson(request);
+      if (typeof payload.healthy !== "boolean") {
+        json(response, 400, { error: { message: "healthy must be boolean" } });
+        return;
+      }
+      forcedHealth = payload.healthy;
+      json(response, 200, { healthy: forcedHealth });
+    } catch (error) {
+      json(response, 400, { error: { message: String(error.message || error) } });
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/health") {
     json(response, healthy() ? 200 : 503, {
       status: healthy() ? "ok" : "loading model",
@@ -155,6 +175,34 @@ const server = http.createServer(async (request, response) => {
           connection: "keep-alive",
           "content-type": "text/event-stream; charset=utf-8",
         });
+        if (JSON.stringify(payload.messages ?? []).includes("slow cancellation acceptance")) {
+          response.write(`data: ${JSON.stringify({
+            id: "chatcmpl-fake",
+            object: "chat.completion.chunk",
+            created,
+            model: modelId,
+            choices: [{ index: 0, delta: { content: "partial" }, finish_reason: null }],
+          })}\n\n`);
+          const interval = setInterval(() => {
+            response.write(`data: ${JSON.stringify({
+              id: "chatcmpl-fake",
+              object: "chat.completion.chunk",
+              created,
+              model: modelId,
+              choices: [{ index: 0, delta: { content: "." }, finish_reason: null }],
+            })}\n\n`);
+          }, 1_000);
+          let disconnected = false;
+          const stopStreaming = () => {
+            clearInterval(interval);
+            if (disconnected) return;
+            disconnected = true;
+            console.log(JSON.stringify({ event: "stream-client-disconnected" }));
+          };
+          request.once("aborted", stopStreaming);
+          response.once("close", stopStreaming);
+          return;
+        }
         for (const token of content.match(/\S+\s*/g) || [content]) {
           response.write(`data: ${JSON.stringify({
             id: "chatcmpl-fake",

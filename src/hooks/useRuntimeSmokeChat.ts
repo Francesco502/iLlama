@@ -82,19 +82,26 @@ export function useRuntimeSmokeChat({
       setStreaming(true);
       setStreamTokensPerSecond(null);
 
-      if (!isTauriRuntime()) {
-        setMessages((current) =>
-          updateMessage(current, assistantId, {
-            content: "这是浏览器预览模式的模拟回复；真实请求会在 Tauri 应用中发送给 llama-server。",
-            status: "complete",
-          }),
-        );
-        setStreaming(false);
-        return;
-      }
-
       const controller = new AbortController();
       abortControllerRef.current = controller;
+
+      if (!isTauriRuntime()) {
+        try {
+          await abortableDelay(1_000, controller.signal);
+          setMessages((current) =>
+            updateMessage(current, assistantId, {
+              content: "这是浏览器预览模式的模拟回复；真实请求会在 Tauri 应用中发送给 llama-server。",
+              status: "complete",
+            }),
+          );
+        } catch {
+          setMessages((current) => updateMessage(current, assistantId, { status: "cancelled" }));
+        } finally {
+          abortControllerRef.current = null;
+          setStreaming(false);
+        }
+        return;
+      }
 
       try {
         await streamChatCompletion({
@@ -156,6 +163,16 @@ export function useRuntimeSmokeChat({
     cancelGeneration,
     clearMessages,
   };
+}
+
+function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(resolve, milliseconds);
+    signal.addEventListener("abort", () => {
+      window.clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
 }
 
 function toRequestMessage(message: RuntimeSmokeMessage): ChatRequestMessage {

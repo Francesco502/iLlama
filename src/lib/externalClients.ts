@@ -145,7 +145,7 @@ export async function checkRuntimeConnection(
   connection: RuntimeConnection,
   signal?: AbortSignal,
 ): Promise<RuntimeConnectionCheckResult> {
-  const healthUrl = `http://${connection.host}:${connection.port}/health`;
+  const healthUrl = buildLoopbackHttpUrl(connection.host, connection.port, "/health");
   const [health, models] = await Promise.all([
     fetchEndpoint(healthUrl, 2_000, "Health 检测超过 2 秒未完成。", signal),
     fetchEndpoint(connection.modelsUrl, 5_000, "Models 检测超过 5 秒未完成。", signal),
@@ -266,3 +266,4 @@ function describeEndpointFailure(result: EndpointResult): string {
   return "未知错误";
 }
 import type { RuntimeSnapshot } from "../api/tauri";
+import { buildLoopbackHttpUrl } from "../api/loopbackUrl";

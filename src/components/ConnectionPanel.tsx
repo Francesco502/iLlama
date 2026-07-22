@@ -147,6 +147,7 @@ export function ConnectionPanel({
           </button>
           <button
             className="ghost-button"
+            data-native-acceptance-target="connection-check"
             type="button"
             disabled={checkState.status === "checking"}
             onClick={() => void handleConnectionCheck()}
@@ -154,7 +155,7 @@ export function ConnectionPanel({
             <FlaskConical size={14} />
             {checkState.status === "checking" ? "检测中" : "检测连接"}
           </button>
-          <button className="start-button secondary" type="button" onClick={onOpenTest}>
+          <button className="start-button secondary" data-native-acceptance-target="open-test" type="button" onClick={onOpenTest}>
             <FlaskConical size={14} />
             打开测试
           </button>
@@ -195,6 +196,7 @@ export function ConnectionPanel({
               <div>
                 <h3>{profile.name}</h3>
                 <p>{profile.summary}</p>
+                <small className="client-compatibility-status">兼容配置参考 · 尚未完成真实版本验证</small>
               </div>
               <div className="external-client-fields">
                 {profile.fields.map((field) => (

@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { packageSignedMacRelease } from "./lib/macos-release-chain.mjs";
 
 const cwd = process.cwd();
 const packageJson = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8"));
@@ -25,7 +25,7 @@ function run(command, args, options = {}) {
     ...options,
   });
   if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+    throw new Error(`${command} failed with exit status ${result.status ?? "unknown"}`);
   }
 }
 
@@ -71,13 +71,8 @@ function ensureAppleSiliconBuildHost() {
 }
 
 function generateAndVerifyChecksum() {
-  const checksum = capture("shasum", ["-a", "256", dmgPath]);
-  if (!checksum.ok) {
-    console.error(checksum.output.trim());
-    process.exit(checksum.status ?? 1);
-  }
-  writeFileSync(checksumPath, checksum.output);
-  run("shasum", ["-a", "256", "-c", checksumPath]);
+  run("node", ["scripts/lib/portable-checksum.mjs", "create", dmgPath, checksumPath]);
+  run("node", ["scripts/lib/portable-checksum.mjs", "verify", checksumPath]);
 }
 
 function resolveDeveloperIdIdentity() {
@@ -128,7 +123,12 @@ function ensureNotaryProfile() {
 ensureAppleSiliconBuildHost();
 ensureExternalLlamaServerStrategy();
 const signingIdentity = unsignedRelease ? null : resolveDeveloperIdIdentity();
+const teamId = unsignedRelease ? null : process.env.APPLE_TEAM_ID;
 if (!unsignedRelease) {
+  if (!teamId) {
+    console.error("APPLE_TEAM_ID is required to verify the signed app TeamIdentifier.");
+    process.exit(1);
+  }
   ensureNotaryProfile();
 }
 
@@ -192,14 +192,22 @@ if (unsignedRelease) {
   );
 
   try {
-    run("npx", ["tauri", "build", "--ci", "--config", signingConfigPath]);
+    run("npx", [
+      "tauri",
+      "build",
+      "--ci",
+      "--bundles",
+      "app",
+      "--config",
+      signingConfigPath,
+    ]);
   } finally {
     rmSync(signingConfigPath, { force: true });
   }
 }
 
-run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
 if (unsignedRelease) {
+  run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
   const assessment = capture("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]);
   if (assessment.ok) {
     console.warn("Gatekeeper assessment unexpectedly passed for the unsigned release.");
@@ -209,19 +217,17 @@ if (unsignedRelease) {
   }
   console.warn(`Unsigned DMG built at: ${dmgPath}`);
 } else {
-  run("xcrun", ["notarytool", "submit", dmgPath, "--keychain-profile", notaryProfile, "--wait"]);
-  run("xcrun", ["stapler", "staple", dmgPath]);
-  run("xcrun", ["stapler", "validate", dmgPath]);
-  run("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]);
-  run("spctl", [
-    "--assess",
-    "--type",
-    "open",
-    "--context",
-    "context:primary-signature",
-    "--verbose=4",
+  packageSignedMacRelease({
+    appPath,
     dmgPath,
-  ]);
+    signingIdentity,
+    teamId,
+    notaryProfile,
+    volumeName: "iLlama",
+    dmgIdentifier: "com.illama.mac.dmg",
+    run,
+    capture,
+  });
 }
 
 generateAndVerifyChecksum();

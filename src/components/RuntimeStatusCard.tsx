@@ -87,7 +87,7 @@ export function RuntimeStatusCard({ snapshot, onStop, onOpenLogs }: RuntimeStatu
             {statusLabel[snapshot.status]}
           </span>
           {snapshot.pid !== null && (
-            <button className="stop-button" type="button" onClick={onStop} aria-label="停止服务">
+            <button className="stop-button" data-native-acceptance-target="stop" type="button" onClick={onStop} aria-label="停止服务">
               <Square size={10} />
               停止
             </button>

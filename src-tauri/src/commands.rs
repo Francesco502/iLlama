@@ -1,4 +1,8 @@
 use crate::{
+    acceptance::{
+        NativeAcceptanceConfig, NativeAcceptanceMarker, NativeAcceptanceState,
+        SettingsIsolationEvidence,
+    },
     health::{check_http_health, find_available_port, HealthStatus},
     legacy_chat_export::export_legacy_chat_history,
     llama_process::{LlamaProcessState, RuntimeSnapshot},
@@ -118,7 +122,11 @@ pub async fn scan_model_directory_in_background(
 pub fn load_settings_command(
     app: AppHandle,
     store: State<'_, SettingsStore>,
+    acceptance: State<'_, NativeAcceptanceState>,
 ) -> Result<SettingsEnvelope, String> {
+    if let Some(envelope) = acceptance.normal_settings_envelope()? {
+        return Ok(envelope);
+    }
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -174,8 +182,12 @@ pub fn resolve_llama_server_path_command(
 pub fn patch_settings_command(
     app: AppHandle,
     store: State<'_, SettingsStore>,
+    acceptance: State<'_, NativeAcceptanceState>,
     patch: serde_json::Value,
 ) -> Result<SettingsEnvelope, String> {
+    if let Some(envelope) = acceptance.patch_normal_settings(patch.clone())? {
+        return Ok(envelope);
+    }
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     store
         .patch(&settings_path(app_data_dir), patch)
@@ -249,8 +261,12 @@ pub fn find_available_port_command(host: String, preferred: u16) -> Result<u16, 
 pub fn set_tray_enabled_command(
     app: AppHandle,
     store: State<'_, SettingsStore>,
+    acceptance: State<'_, NativeAcceptanceState>,
     enabled: bool,
 ) -> Result<bool, String> {
+    if let Some(enabled) = acceptance.set_normal_tray_enabled(enabled)? {
+        return Ok(enabled);
+    }
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let path = settings_path(app_data_dir);
     store
@@ -271,6 +287,98 @@ pub fn set_tray_enabled_command(
 }
 
 #[tauri::command]
-pub fn get_tray_enabled_command(app: AppHandle) -> bool {
-    tray::is_tray_active(&app)
+pub fn get_tray_enabled_command(
+    app: AppHandle,
+    acceptance: State<'_, NativeAcceptanceState>,
+) -> Result<bool, String> {
+    if let Some(enabled) = acceptance.normal_tray_enabled()? {
+        return Ok(enabled);
+    }
+    Ok(tray::is_tray_active(&app))
+}
+
+#[tauri::command]
+pub fn native_acceptance_config_command(
+    state: State<'_, NativeAcceptanceState>,
+) -> Option<NativeAcceptanceConfig> {
+    state.emit_marker(NativeAcceptanceMarker::WebviewIpc);
+    state.config().cloned()
+}
+
+#[tauri::command]
+pub fn native_acceptance_runner_started_command(
+    state: State<'_, NativeAcceptanceState>,
+) -> Result<(), String> {
+    if state.config().is_none() {
+        return Err("native acceptance mode is disabled".to_string());
+    }
+    state.emit_marker(NativeAcceptanceMarker::RunnerStarted);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn normal_acceptance_progress_command(
+    state: State<'_, NativeAcceptanceState>,
+    observation: serde_json::Value,
+) -> Result<(), String> {
+    let config = state
+        .config()
+        .filter(|config| config.surface == "normal-app")
+        .ok_or_else(|| "normal acceptance mode is disabled".to_string())?;
+    let object = observation
+        .as_object()
+        .ok_or_else(|| "normal acceptance observation must be an object".to_string())?;
+    if object
+        .get("sequence")
+        .and_then(serde_json::Value::as_u64)
+        .is_none()
+        || !matches!(
+            object.get("kind").and_then(serde_json::Value::as_str),
+            Some("ready" | "focus" | "input" | "milestone" | "failure")
+        )
+    {
+        return Err("normal acceptance observation is invalid".to_string());
+    }
+    if matches!(
+        object.get("kind").and_then(serde_json::Value::as_str),
+        Some("focus" | "input")
+    ) && object.get("isTrusted").and_then(serde_json::Value::as_bool) != Some(true)
+    {
+        return Err("normal acceptance input observation must be trusted".to_string());
+    }
+    let mut marker = observation;
+    marker["runNonce"] = serde_json::Value::String(config.run_nonce.clone());
+    eprintln!(
+        "[normal-acceptance] {}",
+        serde_json::to_string(&marker).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn native_acceptance_settings_isolation_command(
+    state: State<'_, NativeAcceptanceState>,
+) -> Result<SettingsIsolationEvidence, String> {
+    state.settings_isolation_evidence()
+}
+
+#[tauri::command]
+pub fn write_native_acceptance_report_command(
+    state: State<'_, NativeAcceptanceState>,
+    report: serde_json::Value,
+) -> Result<(), String> {
+    state.write_report(&report)
+}
+
+#[tauri::command]
+pub fn finish_native_acceptance_command(
+    app: AppHandle,
+    state: State<'_, NativeAcceptanceState>,
+    report: serde_json::Value,
+    exit_code: i32,
+) -> Result<(), String> {
+    state.validate_finish(&report, exit_code)?;
+    state.write_report(&report)?;
+    app.exit(exit_code);
+    Ok(())
 }

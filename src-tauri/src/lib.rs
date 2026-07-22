@@ -1,3 +1,4 @@
+pub mod acceptance;
 pub mod commands;
 pub mod gguf;
 pub mod health;
@@ -14,8 +15,11 @@ use settings::settings_path;
 use tauri::{Manager, WindowEvent};
 
 pub fn run() {
+    let acceptance_state = acceptance::NativeAcceptanceState::from_env()
+        .expect("invalid native acceptance configuration");
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(acceptance_state)
         .manage(llama_process::LlamaProcessState::default())
         .manage(settings::SettingsStore::default())
         .invoke_handler(tauri::generate_handler![
@@ -35,11 +39,35 @@ pub fn run() {
             commands::check_health_command,
             commands::find_available_port_command,
             commands::set_tray_enabled_command,
-            commands::get_tray_enabled_command
+            commands::get_tray_enabled_command,
+            commands::native_acceptance_config_command,
+            commands::native_acceptance_runner_started_command,
+            commands::normal_acceptance_progress_command,
+            commands::native_acceptance_settings_isolation_command,
+            commands::write_native_acceptance_report_command,
+            commands::finish_native_acceptance_command
         ])
         .setup(|app| {
-            // Read persisted setting; create tray if enabled
-            if let Ok(app_data_dir) = app.path().app_data_dir() {
+            let acceptance: tauri::State<acceptance::NativeAcceptanceState> = app.state();
+            acceptance.emit_marker(acceptance::NativeAcceptanceMarker::TauriSetup);
+            let acceptance_config = acceptance.config().cloned();
+            if let Some(config) = acceptance_config.as_ref() {
+                if config.surface == "normal-app" {
+                    if let Ok(app_data_dir) = app.path().app_data_dir() {
+                        acceptance
+                            .capture_user_settings(&settings_path(app_data_dir))
+                            .map_err(std::io::Error::other)?;
+                    }
+                    if let Some(window) = app.get_webview_window("main") {
+                        window.set_size(tauri::LogicalSize::new(
+                            f64::from(config.viewport_width),
+                            f64::from(config.viewport_height),
+                        ))?;
+                    }
+                }
+            } else if let Ok(app_data_dir) = app.path().app_data_dir() {
+                // Normal launches retain the persisted tray preference. Acceptance launches never
+                // read/migrate user settings or create/destroy a tray icon.
                 let path = settings_path(app_data_dir);
                 let store: tauri::State<settings::SettingsStore> = app.state();
                 if let Ok(envelope) = store.load_for_setup(&path) {

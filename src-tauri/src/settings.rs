@@ -347,15 +347,23 @@ fn create_unique_temp_file(path: &Path) -> io::Result<(PathBuf, fs::File)> {
 
 pub fn patch_settings_to(path: &Path, patch: serde_json::Value) -> io::Result<SettingsEnvelope> {
     let mut envelope = load_settings_envelope_from(path)?;
-    let mut value = serde_json::to_value(&envelope.settings)?;
-    merge_json_patch(&mut value, patch);
-    value["schemaVersion"] = serde_json::Value::from(3);
-    let settings = serde_json::from_value::<AppSettings>(value)
-        .map(normalize_settings)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let settings = patch_settings_in_memory(&envelope.settings, patch)?;
     save_settings_to(path, &settings)?;
     envelope.settings = settings;
     Ok(envelope)
+}
+
+pub fn patch_settings_in_memory(
+    current: &AppSettings,
+    mut patch: serde_json::Value,
+) -> io::Result<AppSettings> {
+    remove_tray_preference(&mut patch);
+    let mut value = serde_json::to_value(current)?;
+    merge_json_patch(&mut value, patch);
+    value["schemaVersion"] = serde_json::Value::from(3);
+    serde_json::from_value::<AppSettings>(value)
+        .map(normalize_settings)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))
 }
 
 pub fn settings_path(app_data_dir: PathBuf) -> PathBuf {

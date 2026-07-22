@@ -221,6 +221,7 @@ export function AppLayout({
           <div className="tab-bar" role="tablist" aria-label="工作台页面">
             <button
               className="tab-button"
+              data-native-acceptance-target="tab-run"
               type="button"
               data-active={activeTab === "run"}
               id="tab-run"
@@ -234,6 +235,7 @@ export function AppLayout({
             </button>
             <button
               className="tab-button"
+              data-native-acceptance-target="tab-connect"
               type="button"
               data-active={activeTab === "connect"}
               id="tab-connect"
@@ -247,6 +249,7 @@ export function AppLayout({
             </button>
             <button
               className="tab-button"
+              data-native-acceptance-target="tab-test"
               type="button"
               data-active={activeTab === "test"}
               id="tab-test"
