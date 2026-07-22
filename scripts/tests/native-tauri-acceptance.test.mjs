@@ -173,6 +173,44 @@ test("normal App stop fallback restores focus before sending trusted Space", asy
   assert.equal(result.milestone.name, "keyboard-stop-llama");
 });
 
+test("normal App can use trusted Space as the primary activation while focus is still on stop", async () => {
+  const runNonce = "stop-primary-space";
+  const output = { stdout: "", stderr: "" };
+  let sequence = 0;
+  const actions = [];
+  const emit = (marker) => {
+    output.stderr += `[normal-acceptance] ${JSON.stringify({
+      runNonce,
+      sequence: ++sequence,
+      ...marker,
+    })}\n`;
+  };
+
+  const result = await activateNormalTargetWithTrustedKeyboard({
+    appPid: 4321,
+    target: "stop",
+    expectedMilestone: "keyboard-stop-llama",
+    primaryKey: " ",
+    child: { exitCode: null, signalCode: null },
+    output,
+    runNonce,
+    deadline: Date.now() + 250,
+    execute: (lines) => {
+      const action = lines.at(-2);
+      actions.push(action);
+      if (action === "key code 49") {
+        emit({ kind: "input", target: "stop", key: " ", isTrusted: true });
+        emit({ kind: "milestone", name: "keyboard-stop-llama" });
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+
+  assert.deepEqual(actions, ["key code 49"]);
+  assert.equal(result.activationKey, " ");
+  assert.equal(result.milestone.name, "keyboard-stop-llama");
+});
+
 test("normal App report accepts trusted Space for stop only with real stopped-runtime evidence", () => {
   const report = validNormalReport();
   report.trustedInputs.at(-1).key = " ";
