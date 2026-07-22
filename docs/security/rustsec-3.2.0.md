@@ -1,7 +1,7 @@
 # RustSec review for iLlama 3.2.0
 
-Review date: 2026-07-22 (Asia/Hong_Kong)  
-Owner: iLlama maintainers / release owner  
+Review date: 2026-07-22 (Asia/Hong_Kong)
+Owner: iLlama maintainers / release owner
 Mandatory re-review deadline: 2026-10-22
 
 ## Audit provenance and decision
