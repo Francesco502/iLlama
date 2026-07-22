@@ -6,6 +6,7 @@ import {
   externalClientProfiles,
 } from "./externalClients";
 import type { RuntimeSnapshot } from "../api/tauri";
+import { resolvedStartupParametersFixture } from "../test/resolvedStartupParameters";
 
 describe("external client connection helpers", () => {
   it("builds OpenAI-compatible endpoint details from the active runtime", () => {
@@ -45,7 +46,7 @@ describe("external client connection helpers", () => {
         modelPath: "/models/a.gguf",
         host: "127.0.0.1",
         port: 8080,
-        parameters: {
+        parameters: resolvedStartupParametersFixture({
           ctxSize: 4096,
           threads: "auto",
           threadsBatch: "auto",
@@ -59,7 +60,8 @@ describe("external client connection helpers", () => {
           idleSleepSeconds: 0,
           mmprojPath: null,
           mmprojOffload: true,
-        },
+        }),
+        commandArgs: [],
         prometheusHints: {
           kvSubstrings: [],
           promptSubstrings: [],

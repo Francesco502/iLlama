@@ -2,14 +2,16 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeSnapshot } from "../api/tauri";
 import type { LaunchConfig } from "../types/domain";
-import { runtimeSnapshot, startLlama, stopLlama } from "../api/tauri";
+import { isTauriRuntime, runtimeSnapshot, startLlama, stopLlama } from "../api/tauri";
 import { useLlamaProcess } from "./useLlamaProcess";
+import { resolvedStartupParametersFixture } from "../test/resolvedStartupParameters";
 
 vi.mock("../api/tauri", () => ({
-  isTauriRuntime: () => true,
+  isTauriRuntime: vi.fn(() => true),
   runtimeSnapshot: vi.fn(),
   startLlama: vi.fn(),
   stopLlama: vi.fn(),
+  normalizeCommandError: (error: unknown) => error,
 }));
 
 const config: LaunchConfig = {
@@ -50,7 +52,8 @@ const startingSnapshot: RuntimeSnapshot = {
     modelPath: config.modelPath!,
     host: config.host,
     port: config.port,
-    parameters: config.parameters,
+    parameters: resolvedStartupParametersFixture(config.parameters),
+    commandArgs: [],
     prometheusHints: config.prometheusHints,
     startedAt: "2026-07-21T00:00:00Z",
     modelId: null,
@@ -70,6 +73,7 @@ const startingSnapshot: RuntimeSnapshot = {
 describe("useLlamaProcess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(isTauriRuntime).mockReturnValue(true);
     vi.useFakeTimers();
     vi.mocked(startLlama).mockResolvedValue(startingSnapshot);
     vi.mocked(runtimeSnapshot).mockResolvedValue(startingSnapshot);
@@ -117,6 +121,24 @@ describe("useLlamaProcess", () => {
 
     expect(result.current.snapshot.activeLaunch?.modelPath).toBe("/models/a.gguf");
     expect(result.current.canStop).toBe(true);
+  });
+
+  it("does not fabricate a running process in browser preview mode", async () => {
+    vi.mocked(isTauriRuntime).mockReturnValue(false);
+    const appendSystemLog = vi.fn();
+    const { result } = renderHook(() =>
+      useLlamaProcess({ appendSystemLog, mergeLogs: vi.fn() }),
+    );
+
+    await act(async () => result.current.handleStart(config));
+
+    expect(result.current.snapshot.status).toBe("idle");
+    expect(result.current.snapshot.pid).toBeNull();
+    expect(result.current.snapshot.activeLaunch).toBeNull();
+    expect(startLlama).not.toHaveBeenCalled();
+    expect(appendSystemLog).toHaveBeenCalledWith(
+      "浏览器预览模式仅展示界面，无法执行原生 llama-server。",
+    );
   });
 
   it("keeps a live process in starting state after two minutes", async () => {
@@ -195,5 +217,24 @@ describe("useLlamaProcess", () => {
     });
     expect(result.current.isStartPending).toBe(false);
     expect(result.current.canStop).toBe(true);
+  });
+
+  it("preserves a structured recovery action when start fails", async () => {
+    vi.mocked(startLlama).mockRejectedValueOnce({
+      code: "port_unavailable",
+      message: "端口被占用",
+      recoveryAction: "changePort",
+    });
+    const { result } = renderHook(() =>
+      useLlamaProcess({ appendSystemLog: vi.fn(), mergeLogs: vi.fn() }),
+    );
+
+    await act(async () => result.current.handleStart(config));
+
+    expect(result.current.commandError).toEqual({
+      code: "port_unavailable",
+      message: "端口被占用",
+      recoveryAction: "changePort",
+    });
   });
 });

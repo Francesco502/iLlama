@@ -16,12 +16,50 @@ use std::{
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Default)]
 pub struct SettingsStore {
     mutation_lock: Mutex<()>,
+    pending_warnings: Mutex<Vec<SettingsWarning>>,
+}
+
+impl Default for SettingsStore {
+    fn default() -> Self {
+        Self {
+            mutation_lock: Mutex::new(()),
+            pending_warnings: Mutex::new(Vec::new()),
+        }
+    }
 }
 
 impl SettingsStore {
+    pub fn load_for_setup(&self, path: &Path) -> io::Result<SettingsEnvelope> {
+        let _guard = self
+            .mutation_lock
+            .lock()
+            .map_err(|_| io::Error::other("设置存储锁定失败。"))?;
+        let envelope = load_settings_envelope_from(path)?;
+        if !envelope.warnings.is_empty() {
+            *self
+                .pending_warnings
+                .lock()
+                .map_err(|_| io::Error::other("设置警告锁定失败。"))? = envelope.warnings.clone();
+        }
+        Ok(envelope)
+    }
+
+    pub fn load(&self, path: &Path) -> io::Result<SettingsEnvelope> {
+        let _guard = self
+            .mutation_lock
+            .lock()
+            .map_err(|_| io::Error::other("设置存储锁定失败。"))?;
+        let mut envelope = load_settings_envelope_from(path)?;
+        let mut pending = self
+            .pending_warnings
+            .lock()
+            .map_err(|_| io::Error::other("设置警告锁定失败。"))?;
+        envelope.warnings.extend(pending.drain(..));
+        Ok(envelope)
+    }
+
     pub fn patch(&self, path: &Path, mut patch: serde_json::Value) -> io::Result<SettingsEnvelope> {
         let _guard = self
             .mutation_lock
@@ -134,6 +172,7 @@ pub struct SettingsWarning {
     pub code: String,
     pub message: String,
     pub recovery_action: String,
+    pub recovery_target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -216,6 +255,7 @@ pub fn load_settings_envelope_from(path: &Path) -> io::Result<SettingsEnvelope> 
                 code: "settings_backup_restored".to_string(),
                 message: "检测到未完成的 Windows 设置替换，已从备份恢复。".to_string(),
                 recovery_action: "none".to_string(),
+                recovery_target: None,
             });
             return Ok(envelope);
         }
@@ -257,6 +297,7 @@ pub fn load_settings_envelope_from(path: &Path) -> io::Result<SettingsEnvelope> 
             code: "settings_migrated".to_string(),
             message: "设置已升级到 3.2.0 格式。".to_string(),
             recovery_action: "none".to_string(),
+            recovery_target: None,
         }],
     })
 }
@@ -398,8 +439,8 @@ fn normalize_parameter_preset_source(source: String) -> String {
 fn recover_corrupt_settings(path: &Path, content: &str) -> io::Result<SettingsEnvelope> {
     ensure_parent(path)?;
     let stamp = Utc::now().format("%Y%m%dT%H%M%S%3fZ");
-    let backup = path.with_file_name(format!("settings.corrupt-{stamp}.json"));
-    fs::write(&backup, content)?;
+    let backup = create_corrupt_backup(path, content, &stamp.to_string())?;
+    let recovery_target = fs::canonicalize(&backup)?;
     let settings = default_settings();
     save_settings_to(path, &settings)?;
     Ok(SettingsEnvelope {
@@ -408,8 +449,151 @@ fn recover_corrupt_settings(path: &Path, content: &str) -> io::Result<SettingsEn
             code: "settings_recovered".to_string(),
             message: format!("设置文件损坏，已备份到 {}。", backup.display()),
             recovery_action: "open-settings-backup".to_string(),
+            recovery_target: Some(recovery_target.to_string_lossy().to_string()),
         }],
     })
+}
+
+fn create_corrupt_backup(path: &Path, content: &str, stamp: &str) -> io::Result<PathBuf> {
+    let mut collision = 0_u64;
+    loop {
+        let suffix = if collision == 0 {
+            String::new()
+        } else {
+            format!("-{collision}")
+        };
+        let backup = path.with_file_name(format!("settings.corrupt-{stamp}{suffix}.json"));
+        match fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&backup)
+        {
+            Ok(mut file) => {
+                file.write_all(content.as_bytes())?;
+                file.sync_all()?;
+                return Ok(backup);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                collision = collision
+                    .checked_add(1)
+                    .ok_or_else(|| io::Error::other("无法为损坏设置创建唯一备份文件。"))?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+pub fn validate_settings_recovery_target(
+    app_data_dir: &Path,
+    requested_path: &Path,
+) -> io::Result<PathBuf> {
+    let requested_metadata = fs::symlink_metadata(requested_path)?;
+    if requested_metadata.file_type().is_symlink() || !requested_metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "设置恢复目标必须是普通文件且不能是符号链接。",
+        ));
+    }
+    let canonical_app_data = fs::canonicalize(app_data_dir)?;
+    let canonical_target = fs::canonicalize(requested_path)?;
+    if canonical_target.parent() != Some(canonical_app_data.as_path()) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "设置恢复目标不在应用数据目录中。",
+        ));
+    }
+    let file_name = canonical_target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "设置恢复目标文件名无效。"))?;
+    if !is_timestamped_corrupt_settings_backup(file_name) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "设置恢复目标不是有效的损坏设置备份。",
+        ));
+    }
+    Ok(canonical_target)
+}
+
+fn is_timestamped_corrupt_settings_backup(file_name: &str) -> bool {
+    let Some(stem) = file_name
+        .strip_prefix("settings.corrupt-")
+        .and_then(|name| name.strip_suffix(".json"))
+    else {
+        return false;
+    };
+    let Some(stamp) = stem.get(..19) else {
+        return false;
+    };
+    let collision_suffix = &stem[19..];
+    stamp.len() == 19
+        && stamp.as_bytes().get(8) == Some(&b'T')
+        && stamp.as_bytes().get(18) == Some(&b'Z')
+        && stamp
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 8 | 18) || byte.is_ascii_digit())
+        && (collision_suffix.is_empty()
+            || collision_suffix.strip_prefix('-').is_some_and(|value| {
+                !value.is_empty()
+                    && !value.starts_with('0')
+                    && value.bytes().all(|byte| byte.is_ascii_digit())
+            }))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevealPlatform {
+    Macos,
+    Windows,
+    Linux,
+}
+
+impl RevealPlatform {
+    pub fn current() -> Self {
+        #[cfg(target_os = "macos")]
+        return Self::Macos;
+        #[cfg(target_os = "windows")]
+        return Self::Windows;
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        return Self::Linux;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevealCommandSpec {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+pub fn build_settings_backup_reveal_command(
+    app_data_dir: &Path,
+    requested_path: &Path,
+    platform: RevealPlatform,
+) -> io::Result<RevealCommandSpec> {
+    let canonical_target = validate_settings_recovery_target(app_data_dir, requested_path)?;
+    let canonical_app_data = canonical_target.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "设置恢复目标缺少应用数据父目录。",
+        )
+    })?;
+    let directory = canonical_app_data.to_string_lossy().to_string();
+    let program = match platform {
+        RevealPlatform::Macos => "open",
+        RevealPlatform::Windows => "explorer",
+        RevealPlatform::Linux => "xdg-open",
+    };
+    Ok(RevealCommandSpec {
+        program: program.to_string(),
+        args: vec![directory],
+    })
+}
+
+pub fn launch_settings_backup_reveal_with(
+    command: &RevealCommandSpec,
+    launch: impl FnOnce(&str, &[String]) -> io::Result<()>,
+) -> io::Result<()> {
+    launch(&command.program, &command.args)
 }
 
 fn merge_json_patch(target: &mut serde_json::Value, patch: serde_json::Value) {
@@ -584,4 +768,30 @@ fn ensure_parent(path: &Path) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod recovery_tests {
+    use super::create_corrupt_backup;
+    use std::{fs, os::unix::fs::symlink};
+
+    #[test]
+    fn corrupt_backup_creation_never_follows_or_truncates_an_existing_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        let outside = dir.path().join("outside.json");
+        fs::write(&outside, "outside sentinel").unwrap();
+        let collision = dir.path().join("settings.corrupt-20260722T093015123Z.json");
+        symlink(&outside, &collision).unwrap();
+
+        let backup =
+            create_corrupt_backup(&settings, "corrupt settings", "20260722T093015123Z").unwrap();
+
+        assert_eq!(fs::read_to_string(outside).unwrap(), "outside sentinel");
+        assert_eq!(
+            backup.file_name().unwrap().to_string_lossy(),
+            "settings.corrupt-20260722T093015123Z-1.json"
+        );
+        assert_eq!(fs::read_to_string(backup).unwrap(), "corrupt settings");
+    }
 }

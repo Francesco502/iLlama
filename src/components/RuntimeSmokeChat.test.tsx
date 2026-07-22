@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { RuntimeSnapshot } from "../api/tauri";
 import { defaultSampling } from "../lib/parameterSchema";
+import { resolvedStartupParametersFixture } from "../test/resolvedStartupParameters";
 import { RuntimeSmokeChat } from "./RuntimeSmokeChat";
 
 const healthySnapshot: RuntimeSnapshot = {
@@ -15,7 +16,7 @@ const healthySnapshot: RuntimeSnapshot = {
     modelPath: "/models/qwen.gguf",
     host: "127.0.0.1",
     port: 8080,
-    parameters: {
+    parameters: resolvedStartupParametersFixture({
       ctxSize: 4096,
       threads: "auto",
       threadsBatch: "auto",
@@ -29,7 +30,8 @@ const healthySnapshot: RuntimeSnapshot = {
       idleSleepSeconds: 0,
       mmprojPath: null,
       mmprojOffload: true,
-    },
+    }),
+    commandArgs: [],
     prometheusHints: {
       kvSubstrings: [],
       promptSubstrings: [],

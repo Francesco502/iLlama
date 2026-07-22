@@ -40,6 +40,7 @@ describe("useAppBootstrap", () => {
           code: "settings_recovered",
           message: "设置文件损坏，已加载默认设置。",
           recoveryAction: "viewLogs",
+          recoveryTarget: null,
         },
       ],
     });

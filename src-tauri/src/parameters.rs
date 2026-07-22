@@ -36,6 +36,41 @@ pub struct StartupParameters {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "source", rename_all = "camelCase")]
+pub enum AppliedParameter<T> {
+    Argument { value: T },
+    ServerDefault { value: () },
+}
+
+impl<T> AppliedParameter<T> {
+    pub fn argument(value: T) -> Self {
+        Self::Argument { value }
+    }
+
+    pub fn server_default() -> Self {
+        Self::ServerDefault { value: () }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedStartupParameters {
+    pub ctx_size: AppliedParameter<u32>,
+    pub threads: AppliedParameter<ThreadSetting>,
+    pub threads_batch: AppliedParameter<ThreadSetting>,
+    pub gpu_layers: AppliedParameter<GpuLayerSetting>,
+    pub batch_size: AppliedParameter<u32>,
+    pub ubatch_size: AppliedParameter<u32>,
+    pub flash_attention: AppliedParameter<FlashAttentionSetting>,
+    pub mmap: AppliedParameter<bool>,
+    pub mlock: AppliedParameter<bool>,
+    pub metrics: AppliedParameter<bool>,
+    pub idle_sleep_seconds: AppliedParameter<u32>,
+    pub mmproj_path: AppliedParameter<String>,
+    pub mmproj_offload: AppliedParameter<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidationResult {
     pub valid: bool,

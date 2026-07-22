@@ -1,4 +1,4 @@
-import type { ActiveLaunchSnapshot } from "../api/tauri";
+import type { ActiveLaunchSnapshot, ResolvedStartupParameters } from "../api/tauri";
 import type { DraftLaunchConfig, PrometheusHintsConfig, StartupParameters } from "../types/domain";
 
 export function getLaunchDraftChanges(
@@ -11,9 +11,46 @@ export function getLaunchDraftChanges(
   compareValue(changes, "modelPath", draft.modelPath, active.modelPath);
   compareValue(changes, "host", draft.host, active.host);
   compareValue(changes, "port", draft.port, active.port);
-  compareRecord(changes, "parameters", draft.parameters, active.parameters);
+  compareRecord(
+    changes,
+    "parameters",
+    draft.parameters,
+    mergeResolvedStartupParameters(draft.parameters, active.parameters),
+  );
   compareRecord(changes, "prometheusHints", draft.prometheusHints, active.prometheusHints);
   return changes;
+}
+
+export function mergeResolvedStartupParameters(
+  draft: StartupParameters,
+  resolved: ResolvedStartupParameters,
+): StartupParameters {
+  return {
+    ctxSize: argumentOrDraft(resolved.ctxSize, draft.ctxSize),
+    threads: argumentOrDraft(resolved.threads, draft.threads),
+    threadsBatch: argumentOrDraft(resolved.threadsBatch, draft.threadsBatch),
+    gpuLayers: argumentOrDraft(resolved.gpuLayers, draft.gpuLayers),
+    batchSize: argumentOrDraft(resolved.batchSize, draft.batchSize),
+    ubatchSize: argumentOrDraft(resolved.ubatchSize, draft.ubatchSize),
+    flashAttention: argumentOrDraft(resolved.flashAttention, draft.flashAttention),
+    mmap: argumentOrDraft(resolved.mmap, draft.mmap),
+    mlock: argumentOrDraft(resolved.mlock, draft.mlock),
+    metrics: argumentOrDraft(resolved.metrics, draft.metrics),
+    idleSleepSeconds: argumentOrDraft(resolved.idleSleepSeconds, draft.idleSleepSeconds),
+    mmprojPath: argumentOrDraft(resolved.mmprojPath, draft.mmprojPath),
+    mmprojOffload: argumentOrDraft(resolved.mmprojOffload, draft.mmprojOffload),
+  };
+}
+
+export function countServerDefaultParameters(resolved: ResolvedStartupParameters): number {
+  return Object.values(resolved).filter((parameter) => parameter.source === "serverDefault").length;
+}
+
+function argumentOrDraft<T>(
+  resolved: { source: "argument"; value: T } | { source: "serverDefault"; value: null },
+  draft: T,
+): T {
+  return resolved.source === "argument" ? resolved.value : draft;
 }
 
 function compareRecord<T extends StartupParameters | PrometheusHintsConfig>(

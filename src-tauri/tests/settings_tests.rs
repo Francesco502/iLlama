@@ -1,6 +1,8 @@
 use illama_lib::settings::{
-    default_settings, detect_llama_server_in_path, load_settings_envelope_from, load_settings_from,
-    patch_settings_to, resolve_llama_server_path, save_settings_to, SettingsStore,
+    build_settings_backup_reveal_command, default_settings, detect_llama_server_in_path,
+    launch_settings_backup_reveal_with, load_settings_envelope_from, load_settings_from,
+    patch_settings_to, resolve_llama_server_path, save_settings_to,
+    validate_settings_recovery_target, RevealPlatform, SettingsStore,
 };
 use serde_json::json;
 use std::{
@@ -200,7 +202,139 @@ fn corrupt_settings_are_backed_up_and_replaced_with_defaults() {
         })
         .count();
     assert_eq!(backups, 1);
+    let recovery = envelope
+        .warnings
+        .iter()
+        .find(|warning| warning.code == "settings_recovered")
+        .and_then(|warning| warning.recovery_target.as_deref())
+        .expect("canonical recovery target");
+    assert_eq!(Path::new(recovery), fs::canonicalize(recovery).unwrap());
+    assert_eq!(
+        Path::new(recovery).parent(),
+        Some(fs::canonicalize(dir.path()).unwrap().as_path())
+    );
     assert!(serde_json::from_str::<serde_json::Value>(&fs::read_to_string(&path).unwrap()).is_ok());
+}
+
+#[test]
+fn recovery_target_validation_only_accepts_timestamped_backups_directly_under_app_data() {
+    let app_data = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let valid = app_data
+        .path()
+        .join("settings.corrupt-20260722T093015123Z.json");
+    let outside_backup = outside
+        .path()
+        .join("settings.corrupt-20260722T093015123Z.json");
+    let wrong_name = app_data.path().join("settings.json");
+    fs::write(&valid, "corrupt").unwrap();
+    fs::write(&outside_backup, "corrupt").unwrap();
+    fs::write(&wrong_name, "{}").unwrap();
+
+    assert_eq!(
+        validate_settings_recovery_target(app_data.path(), &valid).unwrap(),
+        fs::canonicalize(&valid).unwrap()
+    );
+    assert!(validate_settings_recovery_target(app_data.path(), &outside_backup).is_err());
+    assert!(validate_settings_recovery_target(app_data.path(), &wrong_name).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn recovery_target_validation_rejects_symlinks_and_non_regular_files() {
+    use std::os::unix::fs::symlink;
+
+    let app_data = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_file = outside.path().join("outside.json");
+    fs::write(&outside_file, "outside").unwrap();
+    let symlink_path = app_data
+        .path()
+        .join("settings.corrupt-20260722T093015123Z.json");
+    let directory_path = app_data
+        .path()
+        .join("settings.corrupt-20260722T093015124Z.json");
+    symlink(&outside_file, &symlink_path).unwrap();
+    fs::create_dir(&directory_path).unwrap();
+
+    assert!(validate_settings_recovery_target(app_data.path(), &symlink_path).is_err());
+    assert!(validate_settings_recovery_target(app_data.path(), &directory_path).is_err());
+}
+
+#[test]
+fn reveal_command_opens_only_the_canonical_backup_directory_on_every_platform() {
+    let app_data = tempfile::tempdir().unwrap();
+    let backup = app_data
+        .path()
+        .join("settings.corrupt-20260722T093015123Z-1.json");
+    fs::write(&backup, "corrupt").unwrap();
+    let canonical_dir = fs::canonicalize(app_data.path())
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    let mac = build_settings_backup_reveal_command(app_data.path(), &backup, RevealPlatform::Macos)
+        .unwrap();
+    let windows =
+        build_settings_backup_reveal_command(app_data.path(), &backup, RevealPlatform::Windows)
+            .unwrap();
+    let linux =
+        build_settings_backup_reveal_command(app_data.path(), &backup, RevealPlatform::Linux)
+            .unwrap();
+
+    assert_eq!(mac.program, "open");
+    assert_eq!(mac.args, vec![canonical_dir.clone()]);
+    assert_eq!(windows.program, "explorer");
+    assert_eq!(windows.args, vec![canonical_dir.clone()]);
+    assert_eq!(linux.program, "xdg-open");
+    assert_eq!(linux.args, vec![canonical_dir]);
+    assert!(!mac.args.iter().any(|arg| arg.contains("settings.corrupt-")));
+    assert!(!windows
+        .args
+        .iter()
+        .any(|arg| arg.contains("settings.corrupt-")));
+    assert!(!linux
+        .args
+        .iter()
+        .any(|arg| arg.contains("settings.corrupt-")));
+}
+
+#[test]
+fn reveal_adapter_propagates_platform_launcher_failures() {
+    let app_data = tempfile::tempdir().unwrap();
+    let backup = app_data
+        .path()
+        .join("settings.corrupt-20260722T093015123Z.json");
+    fs::write(&backup, "corrupt").unwrap();
+    let command =
+        build_settings_backup_reveal_command(app_data.path(), &backup, RevealPlatform::Macos)
+            .unwrap();
+
+    let error = launch_settings_backup_reveal_with(&command, |_, _| {
+        Err(std::io::Error::other("launcher unavailable"))
+    })
+    .unwrap_err();
+
+    assert!(error.to_string().contains("launcher unavailable"));
+}
+
+#[test]
+fn setup_preload_preserves_recovery_warnings_for_the_first_ui_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    fs::write(&path, "{ definitely not json").unwrap();
+    let store = SettingsStore::default();
+
+    let setup = store.load_for_setup(&path).unwrap();
+    let ui = store.load(&path).unwrap();
+    let second_ui = store.load(&path).unwrap();
+
+    assert_eq!(setup.settings.schema_version, 3);
+    assert!(ui
+        .warnings
+        .iter()
+        .any(|warning| warning.code == "settings_recovered"));
+    assert!(second_ui.warnings.is_empty());
 }
 
 #[test]

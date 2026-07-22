@@ -38,6 +38,7 @@ export interface SettingsWarning {
   code: string;
   message: string;
   recoveryAction: string;
+  recoveryTarget: string | null;
 }
 
 export interface CommandError {
@@ -75,11 +76,33 @@ export interface ActiveLaunchSnapshot {
   modelPath: string;
   host: "127.0.0.1";
   port: number;
-  parameters: StartupParameters;
+  parameters: ResolvedStartupParameters;
+  /** Exact argv accepted by capability filtering; authoritative for what was applied. */
+  commandArgs: string[];
   prometheusHints: PrometheusHintsConfig;
   startedAt: string;
   modelId: string | null;
   serverCapabilities: ServerCapabilities | null;
+}
+
+export type AppliedParameter<T> =
+  | { source: "argument"; value: T }
+  | { source: "serverDefault"; value: null };
+
+export interface ResolvedStartupParameters {
+  ctxSize: AppliedParameter<StartupParameters["ctxSize"]>;
+  threads: AppliedParameter<StartupParameters["threads"]>;
+  threadsBatch: AppliedParameter<StartupParameters["threadsBatch"]>;
+  gpuLayers: AppliedParameter<StartupParameters["gpuLayers"]>;
+  batchSize: AppliedParameter<StartupParameters["batchSize"]>;
+  ubatchSize: AppliedParameter<StartupParameters["ubatchSize"]>;
+  flashAttention: AppliedParameter<StartupParameters["flashAttention"]>;
+  mmap: AppliedParameter<StartupParameters["mmap"]>;
+  mlock: AppliedParameter<StartupParameters["mlock"]>;
+  metrics: AppliedParameter<StartupParameters["metrics"]>;
+  idleSleepSeconds: AppliedParameter<StartupParameters["idleSleepSeconds"]>;
+  mmprojPath: AppliedParameter<string>;
+  mmprojOffload: AppliedParameter<StartupParameters["mmprojOffload"]>;
 }
 
 export interface ServerCapabilities {
@@ -148,6 +171,10 @@ export type AppSettingsPatch = Omit<Partial<AppSettings>, "ui"> & {
 
 export async function patchSettings(patch: AppSettingsPatch): Promise<SettingsEnvelope> {
   return invoke<SettingsEnvelope>("patch_settings_command", { patch });
+}
+
+export async function revealSettingsBackup(path: string): Promise<void> {
+  return invoke<void>("reveal_settings_backup_command", { path });
 }
 
 export async function scanModelDirectory(

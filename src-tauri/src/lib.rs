@@ -10,7 +10,7 @@ pub mod server_probe;
 pub mod settings;
 pub mod tray;
 
-use settings::{load_settings_from, settings_path};
+use settings::settings_path;
 use tauri::{Manager, WindowEvent};
 
 pub fn run() {
@@ -25,6 +25,7 @@ pub fn run() {
             commands::build_command_spec_command,
             commands::scan_model_directory_command,
             commands::load_settings_command,
+            commands::reveal_settings_backup_command,
             commands::resolve_llama_server_path_command,
             commands::patch_settings_command,
             commands::export_legacy_chat_history_command,
@@ -40,8 +41,9 @@ pub fn run() {
             // Read persisted setting; create tray if enabled
             if let Ok(app_data_dir) = app.path().app_data_dir() {
                 let path = settings_path(app_data_dir);
-                if let Ok(settings) = load_settings_from(&path) {
-                    if settings.ui.show_in_menu_bar {
+                let store: tauri::State<settings::SettingsStore> = app.state();
+                if let Ok(envelope) = store.load_for_setup(&path) {
+                    if envelope.settings.ui.show_in_menu_bar {
                         let _ = tray::create_tray(app.handle());
                     }
                 }

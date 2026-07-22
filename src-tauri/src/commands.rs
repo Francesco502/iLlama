@@ -8,13 +8,13 @@ use crate::{
         build_command_spec, probe_llama_server, CommandSpec, ProbeStatus, ServerCapabilities,
     },
     settings::{
-        load_settings_envelope_from, resolve_llama_server_path, settings_path, SettingsEnvelope,
-        SettingsStore,
+        build_settings_backup_reveal_command, launch_settings_backup_reveal_with,
+        resolve_llama_server_path, settings_path, RevealPlatform, SettingsEnvelope, SettingsStore,
     },
     tray,
 };
 use serde::Serialize;
-use std::{env, path::PathBuf};
+use std::{env, path::PathBuf, process::Command};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const MODEL_SCAN_PROGRESS_EVENT: &str = "model-scan-progress";
@@ -58,25 +58,32 @@ pub fn build_command_args_command(config: LaunchConfig) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn probe_llama_server_command(path: String) -> ServerCapabilities {
-    probe_llama_server(&path)
+pub async fn probe_llama_server_command(path: String) -> Result<ServerCapabilities, String> {
+    tauri::async_runtime::spawn_blocking(move || probe_llama_server(&path))
+        .await
+        .map_err(|error| format!("llama-server 探测任务失败：{error}"))
 }
 
 #[tauri::command]
-pub fn build_command_spec_command(
+pub async fn build_command_spec_command(
     config: LaunchConfig,
     capabilities: Option<ServerCapabilities>,
 ) -> Result<CommandSpec, CommandError> {
-    let binary_path = config.binary_path.as_deref().ok_or_else(|| {
+    let binary_path = config.binary_path.clone().ok_or_else(|| {
         command_error(
             "server_required",
             "selectBinary",
             "未找到 llama-server，请选择可执行文件。",
         )
     })?;
-    let capabilities = capabilities
+    let capabilities = match capabilities
         .filter(|capabilities| capabilities.binary_path == binary_path)
-        .unwrap_or_else(|| probe_llama_server(binary_path));
+    {
+        Some(capabilities) => capabilities,
+        None => tauri::async_runtime::spawn_blocking(move || probe_llama_server(&binary_path))
+            .await
+            .map_err(|error| command_error("probe_failed", "selectBinary", error.to_string()))?,
+    };
     build_command_spec(&config, &capabilities).map_err(launch_error)
 }
 
@@ -108,12 +115,36 @@ pub async fn scan_model_directory_in_background(
 }
 
 #[tauri::command]
-pub fn load_settings_command(app: AppHandle) -> Result<SettingsEnvelope, String> {
+pub fn load_settings_command(
+    app: AppHandle,
+    store: State<'_, SettingsStore>,
+) -> Result<SettingsEnvelope, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    load_settings_envelope_from(&settings_path(app_data_dir)).map_err(|error| error.to_string())
+    store
+        .load(&settings_path(app_data_dir))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn reveal_settings_backup_command(app: AppHandle, path: String) -> Result<(), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let command = build_settings_backup_reveal_command(
+        &app_data_dir,
+        path.as_ref(),
+        RevealPlatform::current(),
+    )
+    .map_err(|error| error.to_string())?;
+    launch_settings_backup_reveal_with(&command, |program, args| {
+        Command::new(program).args(args).spawn()?;
+        Ok(())
+    })
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -161,18 +192,21 @@ pub fn export_legacy_chat_history_command(app: AppHandle) -> Result<String, Stri
 }
 
 #[tauri::command]
-pub fn start_llama_command(
+pub async fn start_llama_command(
     state: State<'_, LlamaProcessState>,
     config: LaunchConfig,
 ) -> Result<RuntimeSnapshot, CommandError> {
-    let binary_path = config.binary_path.as_deref().ok_or_else(|| {
+    let binary_path = config.binary_path.clone().ok_or_else(|| {
         command_error(
             "server_required",
             "selectBinary",
             "未找到 llama-server，请选择可执行文件。",
         )
     })?;
-    let capabilities = probe_llama_server(binary_path);
+    let capabilities =
+        tauri::async_runtime::spawn_blocking(move || probe_llama_server(&binary_path))
+            .await
+            .map_err(|error| command_error("probe_failed", "selectBinary", error.to_string()))?;
     if capabilities.status == ProbeStatus::Invalid {
         return Err(command_error(
             "server_incompatible",
@@ -202,7 +236,7 @@ pub async fn runtime_snapshot_command(
 
 #[tauri::command]
 pub async fn check_health_command(host: String, port: u16) -> HealthStatus {
-    check_http_health(&host, port, 500)
+    check_http_health(&host, port, 2_000)
 }
 
 #[tauri::command]

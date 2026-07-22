@@ -6,6 +6,7 @@ import {
   startLlama,
   stopLlama,
   type RuntimeSnapshot,
+  type CommandError,
 } from "../api/tauri";
 import type { LaunchConfig, LogEntry, RuntimeMetrics } from "../types/domain";
 
@@ -41,6 +42,7 @@ interface UseLlamaProcessOptions {
 export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLlamaProcessOptions) {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(idleSnapshot);
   const [isStartPending, setIsStartPending] = useState(false);
+  const [commandError, setCommandError] = useState<CommandError | null>(null);
   const startPendingRef = useRef(false);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nextStartupDelayRef = useRef(HEALTH_STARTUP_INITIAL_DELAY_MS);
@@ -170,31 +172,9 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
       const generation = generationRef.current;
       healthyNotifiedRef.current = false;
       lastErrorRef.current = null;
+      setCommandError(null);
       if (!isTauriRuntime()) {
-        const startedAt = new Date().toISOString();
-        const preview: RuntimeSnapshot = {
-          ...idleSnapshot,
-          status: "healthy",
-          pid: 1,
-          startedAt,
-          activeModelPath: config.modelPath,
-          activeLaunch:
-            config.modelPath
-              ? {
-                  binaryPath: config.binaryPath || "browser-preview",
-                  modelPath: config.modelPath,
-                  host: config.host,
-                  port: config.port,
-                  parameters: config.parameters,
-                  prometheusHints: config.prometheusHints,
-                  startedAt,
-                  modelId: "local",
-                  serverCapabilities: null,
-                }
-              : null,
-        };
-        applySnapshot(preview);
-        appendSystemLog("浏览器预览模式已模拟启动。");
+        appendSystemLog("浏览器预览模式仅展示界面，无法执行原生 llama-server。");
         startPendingRef.current = false;
         setIsStartPending(false);
         return;
@@ -210,7 +190,9 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
         if (next.pid !== null) startHealthPoll(generation);
       } catch (error) {
         if (generation !== generationRef.current) return;
-        const message = normalizeCommandError(error).message;
+        const normalized = normalizeCommandError(error);
+        const message = normalized.message;
+        setCommandError(normalized);
         setSnapshot((current) => ({ ...current, status: "failed", lastError: message }));
         appendSystemLog(message);
       } finally {
@@ -234,10 +216,13 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
       const next = await stopLlama();
       if (generation !== generationRef.current) return;
       applySnapshot(next);
+      setCommandError(null);
       appendSystemLog("llama-server 已停止。");
     } catch (error) {
       if (generation !== generationRef.current) return;
-      const message = normalizeCommandError(error).message;
+      const normalized = normalizeCommandError(error);
+      const message = normalized.message;
+      setCommandError(normalized);
       setSnapshot((current) => ({ ...current, status: "failed", lastError: message }));
       appendSystemLog(message);
     }
@@ -249,6 +234,8 @@ export function useLlamaProcess({ appendSystemLog, mergeLogs, onHealthy }: UseLl
     runtimeMetrics: snapshot.metrics,
     canStop: snapshot.pid !== null,
     isStartPending,
+    commandError,
+    clearCommandError: () => setCommandError(null),
     handleStart,
     handleStop,
     stopHealthPoll,

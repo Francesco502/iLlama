@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeSnapshot } from "../api/tauri";
+import { resolvedStartupParametersFixture } from "../test/resolvedStartupParameters";
 import { RuntimeStatusCard } from "./RuntimeStatusCard";
 
 const snapshot: RuntimeSnapshot = {
@@ -13,7 +14,7 @@ const snapshot: RuntimeSnapshot = {
     modelPath: "/models/Qwen 3.gguf",
     host: "127.0.0.1",
     port: 8088,
-    parameters: {
+    parameters: resolvedStartupParametersFixture({
       ctxSize: 4096,
       threads: "auto",
       threadsBatch: "auto",
@@ -27,7 +28,8 @@ const snapshot: RuntimeSnapshot = {
       idleSleepSeconds: 0,
       mmprojPath: null,
       mmprojOffload: true,
-    },
+    }),
+    commandArgs: [],
     prometheusHints: {
       kvSubstrings: [],
       promptSubstrings: [],

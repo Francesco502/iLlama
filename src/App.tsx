@@ -11,11 +11,13 @@ import { ParameterPanel } from "./components/ParameterPanel";
 import { RuntimeStatusCard } from "./components/RuntimeStatusCard";
 import { RuntimeSmokeChat } from "./components/RuntimeSmokeChat";
 import { SamplingPanel } from "./components/SamplingPanel";
+import { SettingsWarningBanner } from "./components/SettingsWarningBanner";
 import {
   isTauriRuntime,
   findAvailablePort,
   resolveLlamaServerPath,
   getTrayEnabled,
+  revealSettingsBackup,
   setTrayEnabled,
 } from "./api/tauri";
 import { exportLegacyChatHistory } from "./api/legacyChatExport";
@@ -23,7 +25,6 @@ import {
   buildMaxCapabilitySampling,
   buildMaxCapabilityStartupParameters,
   getProfileById,
-  resolveModelContextLimit,
   validateLaunchConfig,
 } from "./lib/parameterSchema";
 import {
@@ -33,7 +34,11 @@ import {
   type ParameterPresetSourceId,
 } from "./lib/parameterPresets";
 import { buildRuntimeConnection } from "./lib/externalClients";
-import { getLaunchDraftChanges } from "./lib/launchDraft";
+import {
+  countServerDefaultParameters,
+  getLaunchDraftChanges,
+  mergeResolvedStartupParameters,
+} from "./lib/launchDraft";
 import { demoModelDirectories, demoModels } from "./state/appStore";
 import {
   buildSettingsSnapshot,
@@ -134,6 +139,8 @@ export function App() {
     handleStart: startProcess,
     handleStop,
     stopHealthPoll,
+    commandError,
+    clearCommandError,
   } = useLlamaProcess({
     appendSystemLog,
     mergeLogs,
@@ -156,6 +163,9 @@ export function App() {
     () => getLaunchDraftChanges(launchDraft, runtimeSnapshot.activeLaunch),
     [launchDraft, runtimeSnapshot.activeLaunch],
   );
+  const serverDefaultParameterCount = runtimeSnapshot.activeLaunch
+    ? countServerDefaultParameters(runtimeSnapshot.activeLaunch.parameters)
+    : 0;
 
   const previewConfig = useMemo(
     () => ({
@@ -290,33 +300,6 @@ export function App() {
   );
 
   useEffect(() => {
-    setStartupParameters((current) => {
-      const base =
-        profileId === "max-capability"
-          ? buildMaxCapabilityStartupParameters(selectedModel?.contextLength ?? null, current)
-          : current;
-      return applyParameterPresetSource(parameterPresetSourceId, selectedModel, base, getProfileById("custom").sampling)
-        .parameters;
-    });
-    setSampling((current) => {
-      const base =
-        profileId === "max-capability"
-          ? buildMaxCapabilitySampling(resolveModelContextLimit(selectedModel?.contextLength ?? null), current)
-          : current;
-      return applyParameterPresetSource(
-        parameterPresetSourceId,
-        selectedModel,
-        getProfileById("custom").parameters,
-        base,
-      ).sampling;
-    });
-  }, [
-    parameterPresetSourceId,
-    profileId,
-    selectedModel,
-  ]);
-
-  useEffect(() => {
     return () => {
       stopHealthPoll();
     };
@@ -374,6 +357,17 @@ export function App() {
     if (typeof selected !== "string") return;
     setStartupParameters((current) => ({ ...current, mmprojPath: selected }));
     appendSystemLog(`已选择 mmproj：${selected}`);
+  }
+
+  async function handleSettingsWarningRecovery(action: string, target: string) {
+    if (action !== "open-settings-backup") return;
+    try {
+      await revealSettingsBackup(target);
+    } catch (error) {
+      appendSystemLog(
+        `无法显示设置备份：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   async function performStart() {
@@ -459,6 +453,38 @@ export function App() {
     await runLaunchTransaction(performStart);
   }
 
+  async function handleRecoveryAction(action: string) {
+    switch (action) {
+      case "changePort": {
+        try {
+          const next = await findAvailablePort("127.0.0.1", Math.min(65535, port + 1));
+          setPort(next);
+          appendSystemLog(`已切换到可用端口 ${next}。`);
+          clearCommandError();
+        } catch (error) {
+          appendSystemLog(error instanceof Error ? error.message : String(error));
+        }
+        break;
+      }
+      case "selectBinary":
+        await handleSelectBinary();
+        clearCommandError();
+        break;
+      case "selectModel":
+        setActiveTab("run");
+        window.requestAnimationFrame(() =>
+          document.querySelector<HTMLElement>("[role='listbox'] [role='option']:not(:disabled)")?.focus(),
+        );
+        break;
+      case "retryStop":
+        await handleStop();
+        break;
+      default:
+        setUiSettings((current) => ({ ...current, logPanelOpen: true }));
+        break;
+    }
+  }
+
   function restoreActiveLaunchToDraft() {
     const active = runtimeSnapshot.activeLaunch;
     if (!active) return;
@@ -466,7 +492,7 @@ export function App() {
     setSelectedModelPath(active.modelPath);
     setPort(active.port);
     setAutoPort(false);
-    setStartupParameters(active.parameters);
+    setStartupParameters((current) => mergeResolvedStartupParameters(current, active.parameters));
     setPrometheusHints(active.prometheusHints);
     appendSystemLog("已将草稿恢复为当前运行配置；自动端口已关闭以保留实际端口。");
   }
@@ -475,11 +501,20 @@ export function App() {
     const nextModel = models.find((model) => model.path === path) ?? null;
     if (!getModelLaunchAssessment(nextModel).allowed) return;
     setSelectedModelPath(path);
-    setStartupParameters((current) => {
-      const mmprojPath = reconcileMmprojPathForModel(current.mmprojPath, nextModel);
-      if (mmprojPath === current.mmprojPath) return current;
-      return { ...current, mmprojPath };
-    });
+    const profileAdjusted = profileId === "max-capability"
+      ? buildMaxCapabilityStartupParameters(nextModel?.contextLength ?? null, startupParameters)
+      : startupParameters;
+    const mmprojPath = reconcileMmprojPathForModel(profileAdjusted.mmprojPath, nextModel);
+    const adjusted = applyParameterPresetSource(
+      parameterPresetSourceId,
+      nextModel,
+      { ...profileAdjusted, mmprojPath },
+      profileId === "max-capability"
+        ? buildMaxCapabilitySampling(profileAdjusted.ctxSize, sampling)
+        : sampling,
+    );
+    setStartupParameters(adjusted.parameters);
+    setSampling(adjusted.sampling);
   }
 
   async function handleExportLegacyHistory() {
@@ -556,28 +591,28 @@ export function App() {
         runContent={
           <div className="config-view">
             {settingsWarning && (
+              <SettingsWarningBanner
+                warning={settingsWarning}
+                onRecovery={(action, target) =>
+                  void handleSettingsWarningRecovery(action, target)
+                }
+                onOpenLogs={() =>
+                  setUiSettings((current) => ({ ...current, logPanelOpen: true }))
+                }
+                onDismiss={() => setSettingsWarning(null)}
+              />
+            )}
+            {commandError && (
               <section className="settings-warning-banner panel" role="alert">
                 <div>
-                  <strong>设置已恢复</strong>
-                  <p>{settingsWarning.message}</p>
+                  <strong>操作未完成</strong>
+                  <p>{commandError.message}</p>
                 </div>
                 <div className="settings-warning-actions">
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() =>
-                      setUiSettings((current) => ({ ...current, logPanelOpen: true }))
-                    }
-                  >
-                    查看日志
+                  <button className="ghost-button" type="button" onClick={() => void handleRecoveryAction(commandError.recoveryAction)}>
+                    {recoveryActionLabel(commandError.recoveryAction)}
                   </button>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() => setSettingsWarning(null)}
-                  >
-                    关闭
-                  </button>
+                  <button className="ghost-button" type="button" onClick={clearCommandError}>关闭</button>
                 </div>
               </section>
             )}
@@ -588,6 +623,11 @@ export function App() {
                 setUiSettings((current) => ({ ...current, logPanelOpen: true }))
               }
             />
+            {runtimeSnapshot.activeLaunch && serverDefaultParameterCount > 0 && (
+              <p className="runtime-server-defaults" role="status">
+                当前服务有 {serverDefaultParameterCount} 项参数由 llama-server 使用默认值；实际值未声明。
+              </p>
+            )}
             {runtimeSnapshot.activeLaunch && launchDraftChanges.length > 0 && (
               <section className="runtime-draft-notice panel" aria-label="下次启动配置变更">
                 <div>
@@ -676,6 +716,7 @@ export function App() {
                   setSampling(adjusted.sampling);
                 }
               }}
+              serverCapabilities={commandPreview.capabilities}
             />
             <SamplingPanel
               parameterMode={profileId}
@@ -743,4 +784,14 @@ export function App() {
       />
     </div>
   );
+}
+
+function recoveryActionLabel(action: string): string {
+  switch (action) {
+    case "changePort": return "更换端口";
+    case "selectBinary": return "选择 llama-server";
+    case "selectModel": return "选择模型";
+    case "retryStop": return "重试停止";
+    default: return "查看日志";
+  }
 }
