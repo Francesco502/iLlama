@@ -99,14 +99,15 @@ operator may use `node scripts/verify-project-policy.mjs --live-rustsec` instead
   ```
 
 - [ ] Status is `ready`; verify default branch `main`, protected environment
-  `macos-release`, required reviewers, exact tag restrictions, all six Apple
+  `macos-release`, exactly one self-approving maintainer reviewer, exact tag
+  restrictions, all six Apple
   credential names plus `RELEASE_INFRASTRUCTURE_AUDIT_TOKEN`, branch protection,
-  self-review prevention, no PR-review bypass actors, exact required checks
+  no independent PR-approval requirement, exact required checks
   bound to the GitHub Actions App (`app_id` 15368), default-branch workflow
   files, candidate tag/SHA,
   compare-API proof that the candidate belongs to protected `main`, a successful
   `push` CI run, and `workflow_dispatch` run-bound acceptance artifacts
-- [ ] If configuration must be applied, re-run with the intended reviewer IDs,
+- [ ] If configuration must be applied, re-run with the sole maintainer reviewer ID,
   exact required check names, `--apply`, and `--confirm-apply`; review the diff
   first because apply mode mutates repository settings, and use a separate
   short-lived Administration-write token rather than the release audit token
@@ -115,8 +116,9 @@ operator may use `node scripts/verify-project-policy.mjs --live-rustsec` instead
 
 ## Signed RC (`v3.2.0-rc.1`)
 
-- [ ] Configure required reviewers and exact tag restrictions on GitHub
-  Environment `macos-release`; disable administrator bypass
+- [ ] Configure the sole maintainer as the required reviewer, allow self-approval,
+  add the exact tag restrictions on GitHub Environment `macos-release`, and
+  disable administrator bypass
 - [ ] Dispatch with `Use workflow from` set to the corresponding tag. CLI:
   `gh workflow run <workflow> --ref <tag> -f tag=<tag>`
 - [ ] Use CI and acceptance runs whose GitHub API `head_branch` equals the

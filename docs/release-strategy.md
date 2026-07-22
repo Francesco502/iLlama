@@ -39,10 +39,12 @@ A successful `main` push for the same SHA is not valid release evidence; CI must
 run again from the exact RC or final tag.
 
 The signed job uses the `macos-release` GitHub Environment. That environment
-must require reviewers and allow only the two exact release tags. Branch
+must require exactly one maintainer reviewer, allow that maintainer to approve
+their own deployment, and allow only the two exact release tags. Branch
 protection on `main` must require the exact cross-platform CI check names and
-strictly require the branch to be current. Administrators must not be allowed
-to bypass the environment protection rules.
+strictly require the branch to be current, without an unavailable independent
+PR approval. Administrators must not be allowed to bypass the environment
+protection rules.
 
 The release job accepts numeric run IDs, never free-form success assertions. It
 checks that CI and protected acceptance runs succeeded for the same repository,
@@ -145,9 +147,10 @@ fail closed.
 ## Infrastructure audit and controlled apply
 
 `scripts/release-infrastructure.mjs` provides a read-only GitHub audit by
-default. Given an explicit repository, candidate SHA, exact tag, and expected
-reviewer IDs, it checks `main`, `macos-release`, exact tag policies, secret names,
-reviewer self-approval prevention, branch protection without review-bypass actors,
+default. Given an explicit repository, candidate SHA, exact tag, and optional
+maintainer reviewer ID, it checks `main`, `macos-release`, exact tag policies,
+secret names, exactly one self-approving maintainer, branch protection without
+an independent PR approval requirement,
 required checks bound to the GitHub Actions App (`app_id` 15368), workflow files
 on the default branch, CI,
 tag binding, protected-`main` ancestry, and workflow-dispatch acceptance
@@ -155,9 +158,10 @@ artifacts. Stable states are `ready`,
 `pending-external`, `missing`, and `misconfigured`; reports never include secret
 values.
 
-Apply mode requires `--apply --confirm-apply`, explicit reviewer IDs, and exact
-required-check names. It is limited to protected-environment/tag-policy and
-branch-protection configuration, preserves stronger compatible protection, and
+Apply mode requires `--apply --confirm-apply`, exactly one explicit maintainer
+reviewer ID, and exact required-check names. It is limited to protected-
+environment/tag-policy and branch-protection configuration, applies the
+single-maintainer approval model, and
 does not create tags, releases, secrets, or workflow runs. It must be run
 separately with an operator-supplied, short-lived token that has Administration
 write permission; the release workflow's read-only

@@ -155,7 +155,7 @@ function happyRoutes() {
         name: "macos-release",
         protection_rules: [
           {
-            prevent_self_review: true,
+            prevent_self_review: false,
             reviewers: [
               { reviewer: { id: 101, login: "release-reviewer" }, type: "User" },
             ],
@@ -196,12 +196,7 @@ function happyRoutes() {
         allow_force_pushes: { enabled: false },
         enforce_admins: { enabled: true },
         required_conversation_resolution: { enabled: true },
-        required_pull_request_reviews: {
-          dismiss_stale_reviews: true,
-          require_code_owner_reviews: true,
-          require_last_push_approval: true,
-          required_approving_review_count: 2,
-        },
+        required_pull_request_reviews: null,
         required_status_checks: {
           checks: REQUIRED_CHECKS.map((context) => ({
             app_id: infrastructure.GITHUB_ACTIONS_APP_ID,
@@ -362,16 +357,30 @@ test("missing required reviewer fails closed", async () => {
   assertFinding(report, "environment-reviewer:101", "missing");
 });
 
-test("release environment must prevent reviewer self-approval", async () => {
+test("multiple environment reviewers violate the single-maintainer policy", async () => {
   const routes = happyRoutes();
   routes.get(
     `GET /repos/${REPOSITORY}/environments/macos-release`,
-  ).protection_rules[0].prevent_self_review = false;
+  ).protection_rules[0].reviewers.push(
+    { reviewer: { id: 202, login: "second-reviewer" }, type: "User" },
+  );
 
   const report = await infrastructure.auditInfrastructure(AUDIT_OPTIONS, createApi(routes));
 
   assert.equal(report.status, "misconfigured");
-  assertFinding(report, "environment-reviewers:prevent-self-review", "misconfigured");
+  assertFinding(report, "environment-reviewers:single-maintainer", "misconfigured");
+});
+
+test("single-maintainer release environment must allow reviewer self-approval", async () => {
+  const routes = happyRoutes();
+  routes.get(
+    `GET /repos/${REPOSITORY}/environments/macos-release`,
+  ).protection_rules[0].prevent_self_review = true;
+
+  const report = await infrastructure.auditInfrastructure(AUDIT_OPTIONS, createApi(routes));
+
+  assert.equal(report.status, "misconfigured");
+  assertFinding(report, "environment-reviewers:self-approval", "misconfigured");
 });
 
 test("release environment must prevent administrator bypass", async () => {
@@ -387,20 +396,22 @@ test("release environment must prevent administrator bypass", async () => {
   assertFinding(report, "environment-admin-bypass", "misconfigured");
 });
 
-test("PR review bypass actors make main protection misconfigured", async () => {
+test("independent PR approval requirements make single-maintainer protection misconfigured", async () => {
   const routes = happyRoutes();
   routes.get(
     `GET /repos/${REPOSITORY}/branches/main/protection`,
-  ).required_pull_request_reviews.bypass_pull_request_allowances = {
-    apps: [],
-    teams: [],
-    users: [{ login: "review-bypass" }],
+  ).required_pull_request_reviews = {
+    bypass_pull_request_allowances: { apps: [], teams: [], users: [] },
+    dismiss_stale_reviews: true,
+    require_code_owner_reviews: true,
+    require_last_push_approval: true,
+    required_approving_review_count: 1,
   };
 
   const report = await infrastructure.auditInfrastructure(AUDIT_OPTIONS, createApi(routes));
 
   assert.equal(report.status, "misconfigured");
-  assertFinding(report, "branch-protection:review-bypass", "misconfigured");
+  assertFinding(report, "branch-protection:reviews", "misconfigured");
 });
 
 for (const [label, mutate] of [
@@ -750,7 +761,7 @@ for (const inputName of REQUIRED_ACCEPTANCE_INPUTS) {
   });
 }
 
-test("apply requires explicit reviewer IDs and exact required check names", async () => {
+test("apply requires exactly one maintainer reviewer ID and exact required check names", async () => {
   const adapter = createApi();
   await assert.rejects(
     infrastructure.applyInfrastructure(
@@ -758,6 +769,13 @@ test("apply requires explicit reviewer IDs and exact required check names", asyn
       adapter,
     ),
     /--reviewer-id/,
+  );
+  await assert.rejects(
+    infrastructure.applyInfrastructure(
+      { ...AUDIT_OPTIONS, confirm: true, reviewerIds: [101, 202] },
+      adapter,
+    ),
+    /exactly one.*--reviewer-id/i,
   );
   await assert.rejects(
     infrastructure.applyInfrastructure(
@@ -874,7 +892,7 @@ test("CLI human apply preview prints every planned mutation before confirmation"
   );
 });
 
-test("confirmed apply only strengthens the environment, tag rules, and branch protection", async () => {
+test("confirmed apply configures single-maintainer approval, tag rules, and branch protection", async () => {
   const routes = happyRoutes();
   const environmentPath = `GET /repos/${REPOSITORY}/environments/macos-release`;
   const environment = routes.get(environmentPath);
@@ -894,12 +912,18 @@ test("confirmed apply only strengthens the environment, tag rules, and branch pr
     contexts: ["Existing protected check"],
     strict: true,
   };
-  protection.required_pull_request_reviews.bypass_pull_request_allowances = {
+  protection.required_pull_request_reviews = {
+    dismiss_stale_reviews: true,
+    require_code_owner_reviews: true,
+    require_last_push_approval: true,
+    required_approving_review_count: 3,
+    dismissal_restrictions: { apps: [], teams: [], users: [] },
+    bypass_pull_request_allowances: {
     apps: [],
     teams: [],
     users: [{ login: "legacy-bypass" }],
+    },
   };
-  protection.required_pull_request_reviews.required_approving_review_count = 3;
 
   const adapter = createApi(routes);
   const result = await infrastructure.applyInfrastructure(
@@ -932,11 +956,11 @@ test("confirmed apply only strengthens the environment, tag rules, and branch pr
   );
   assert.deepEqual(
     environmentUpdate.body.reviewers.map(({ id }) => id).sort((a, b) => a - b),
-    [101, 202],
+    [101],
   );
   assert.equal(environmentUpdate.body.wait_timer, 45);
   assert.equal(environmentUpdate.body.can_admins_bypass, false);
-  assert.equal(environmentUpdate.body.prevent_self_review, true);
+  assert.equal(environmentUpdate.body.prevent_self_review, false);
 
   const protectionUpdate = mutations.find(({ path }) =>
     path.endsWith("/branches/main/protection"),
@@ -950,19 +974,12 @@ test("confirmed apply only strengthens the environment, tag rules, and branch pr
       .filter(({ context }) => REQUIRED_CHECKS.includes(context))
       .every(({ app_id: appId }) => appId === infrastructure.GITHUB_ACTIONS_APP_ID),
   );
-  assert.deepEqual(
-    protectionUpdate.body.required_pull_request_reviews.bypass_pull_request_allowances,
-    { apps: [], teams: [], users: [] },
-  );
+  assert.equal(protectionUpdate.body.required_pull_request_reviews, null);
   assert.deepEqual(
     new Set(
       protectionUpdate.body.required_status_checks.checks.map(({ context }) => context),
     ),
     new Set(REQUIRED_CHECKS),
-  );
-  assert.equal(
-    protectionUpdate.body.required_pull_request_reviews.required_approving_review_count,
-    3,
   );
   assert.equal(protectionUpdate.body.restrictions, null);
 });
