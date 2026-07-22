@@ -277,11 +277,19 @@ export function validateWorkflowSecurityGates(ciWorkflow, releaseWorkflow) {
 
 export function validatePinnedWorkflowActions(workflow, label) {
   const failures = [];
-  for (const match of workflow.matchAll(/^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)/gm)) {
-    const [, action, revision] = match;
-    if (action.startsWith("./") || action.startsWith("docker://")) continue;
+  for (const match of workflow.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {
+    const reference = match[1];
+    if (reference.startsWith("./")) continue;
+    if (reference.startsWith("docker://")) {
+      if (!/^docker:\/\/[^\s@]+@sha256:[0-9a-f]{64}$/.test(reference)) {
+        failures.push(`${label} workflow action ${reference} is not pinned to an immutable image digest.`);
+      }
+      continue;
+    }
+    const separator = reference.lastIndexOf("@");
+    const revision = separator < 0 ? "" : reference.slice(separator + 1);
     if (!/^[0-9a-f]{40}$/.test(revision)) {
-      failures.push(`${label} workflow action ${action}@${revision} is not pinned to a full commit SHA.`);
+      failures.push(`${label} workflow action ${reference} is not pinned to a full commit SHA.`);
     }
   }
   return failures;

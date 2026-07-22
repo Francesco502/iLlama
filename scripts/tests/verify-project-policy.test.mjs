@@ -407,13 +407,18 @@ test("requires every third-party workflow action to use a full commit SHA", () =
   const pinned = [
     "- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7",
     "- uses: ./local-action",
-    "- uses: docker://alpine:3.22",
+    `- uses: docker://alpine@sha256:${"a".repeat(64)}`,
   ].join("\n");
   assert.deepEqual(policy.validatePinnedWorkflowActions(pinned, "Release"), []);
   assert.ok(
     policy
       .validatePinnedWorkflowActions("- uses: actions/checkout@v7", "Release")
       .some((failure) => failure.includes("not pinned")),
+  );
+  assert.ok(
+    policy
+      .validatePinnedWorkflowActions("- uses: docker://alpine:3.22", "Release")
+      .some((failure) => failure.includes("image digest")),
   );
 });
 
