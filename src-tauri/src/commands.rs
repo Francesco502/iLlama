@@ -336,17 +336,10 @@ pub fn run_native_acceptance_external_client_command(
 }
 
 #[tauri::command]
-pub async fn native_acceptance_external_client_status_command(
+pub fn native_acceptance_external_client_status_command(
     acceptance: State<'_, NativeAcceptanceState>,
 ) -> Result<ExternalClientExecutionStatus, String> {
-    let mut result = acceptance.external_client_status()?;
-    if result.status == "running" {
-        // Acceptance runs inside a background WebView whose JavaScript timers can
-        // be suspended by WebKit. Pace polling in the native runtime so completion
-        // never depends on a foreground-window timer and IPC cannot flood the queue.
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        result = acceptance.external_client_status()?;
-    }
+    let result = acceptance.external_client_status()?;
     eprintln!(
         "[native-acceptance] external-client-status:{}",
         result.status
