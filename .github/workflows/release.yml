@@ -115,16 +115,14 @@ jobs:
             gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
               --name "$artifact" --dir "$directory" || return 1
             local report
-            local artifacts=()
             if [[ "$type" == "llama-matrix" ]]; then
               report="$directory/matrix-report.json"
             elif [[ "$type" == "external-client" ]]; then
               report="$directory/external-client-report.json"
-              artifacts+=(--artifact "nativeReport=$directory/native-report.json")
             else
               return 1
             fi
-            node scripts/validate-release-evidence.mjs \
+            set -- node scripts/validate-release-evidence.mjs \
               --evidence "$directory/evidence.json" \
               --type "$type" \
               --report "$report" \
@@ -132,8 +130,11 @@ jobs:
               --workflow-path ".github/workflows/release-acceptance.yml" \
               --run-id "$run_id" \
               --run-attempt "$attempt" \
-              --repository "$GITHUB_REPOSITORY" \
-              "${artifacts[@]}" || return 1
+              --repository "$GITHUB_REPOSITORY"
+            if [[ "$type" == "external-client" ]]; then
+              set -- "$@" --artifact "nativeReport=$directory/native-report.json"
+            fi
+            "$@" || return 1
           }
           validate_run "$CI_RUN_ID" ".github/workflows/ci.yml" push "$RELEASE_TAG"
           verify_evidence llama-matrix "$LLAMA_MATRIX_RUN_ID"

@@ -57,6 +57,7 @@ Model: <运行时 /v1/models 返回的模型 ID>
 ## 用户向说明
 
 - **ctxSize**：与 `llama-server` 的上下文槽位一致；过大占用更多内存与 KV。
+- **GPU 层数**：iLlama 只向外置 `llama-server` 传递通用的 `--n-gpu-layers` 参数。选择 `auto` 时，Metal（Apple Silicon）、CUDA/Vulkan（Windows/Linux）等可用后端的探测与选择由用户安装的 llama.cpp 构建负责；iLlama 不实现推理后端，也不硬编码平台。
 - **自动配置**：按模型 metadata 与设备能力选择启动参数，并为内置「测试」设置安全输出上限；它不保证绝对最快。
 - **自定义**：用滑杆调节上下文长度与输出最大长度。修改 `ctxSize` 后需要重启模型才会影响 `llama-server`。
 - **maxTokens**：单轮内置测试请求的输出上限；外部客户端通常也有自己的输出上限，iLlama 不会强行改写 Chatbox、Cherry Studio、Open WebUI 等客户端发送的 `max_tokens`。
