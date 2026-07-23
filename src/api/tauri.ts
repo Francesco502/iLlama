@@ -283,8 +283,15 @@ export async function markNativeAcceptanceRunnerStarted(): Promise<void> {
   return invoke<void>("native_acceptance_runner_started_command");
 }
 
-export async function runNativeAcceptanceExternalClient(): Promise<void> {
+export async function startNativeAcceptanceExternalClient(): Promise<void> {
   return invoke<void>("run_native_acceptance_external_client_command");
+}
+
+export async function nativeAcceptanceExternalClientStatus(): Promise<{
+  status: "idle" | "running" | "success" | "failure";
+  error: string | null;
+}> {
+  return invoke("native_acceptance_external_client_status_command");
 }
 
 export async function reportNormalAcceptanceProgress(

@@ -107,8 +107,9 @@ describe("runNativeAcceptance", () => {
       path: "/fixtures/external-client.mjs",
       status: "executed",
     });
-    expect(calls.indexOf("external-client")).toBeGreaterThan(calls.indexOf("snapshot:healthy"));
-    expect(calls.indexOf("external-client")).toBeLessThan(calls.indexOf("chat"));
+    expect(calls.indexOf("external-client-start")).toBeGreaterThan(calls.indexOf("snapshot:healthy"));
+    expect(calls.indexOf("external-client-start")).toBeLessThan(calls.indexOf("chat"));
+    expect(calls.indexOf("external-client-status")).toBeGreaterThan(calls.indexOf("stream-chat"));
   });
 
   it("writes a failure report and stops if a simulated PID 1 is returned", async () => {
@@ -263,8 +264,12 @@ function passingDependencies(
     markRunnerStarted: async () => {
       calls.push("runner-started");
     },
-    runExternalClient: async () => {
-      calls.push("external-client");
+    startExternalClient: async () => {
+      calls.push("external-client-start");
+    },
+    externalClientStatus: async () => {
+      calls.push("external-client-status");
+      return { status: "success", error: null };
     },
     scanModelDirectory: async () => {
       calls.push("scan");

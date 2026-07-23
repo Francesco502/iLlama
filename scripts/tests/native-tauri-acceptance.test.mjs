@@ -15,6 +15,7 @@ import {
   createOwnedProcessTreeTracker,
   activateNormalTargetWithTrustedKeyboard,
   driveNormalAppWithTrustedKeyboard,
+  embedExternalClientEvidence,
   identifyNewLaunchServicesApp,
   installLaunchServicesEnvironment,
   launchServicesEnvironmentKeys,
@@ -40,6 +41,26 @@ test("accepts a reasoning-only native chat response", () => {
     finishReason: "length",
   };
   assert.doesNotThrow(() => validateNativeAcceptanceReport(report, expected()));
+});
+
+test("embeds run-bound curl evidence into the stopped iLlama lifecycle report", () => {
+  const report = validReport();
+  report.externalClient = { path: "/tmp/external-client.mjs", status: "executed" };
+  const external = {
+    status: "success",
+    endpoint: `http://127.0.0.1:${report.activeLaunch.port}`,
+    detectedModelId: report.modelId,
+  };
+  const artifacts = {
+    binarySha256: "a".repeat(64),
+    modelSha256: "b".repeat(64),
+  };
+
+  embedExternalClientEvidence(report, external, artifacts);
+
+  assert.deepEqual(report.artifacts, artifacts);
+  assert.deepEqual(report.externalClient.report, external);
+  assert.match(report.externalClient.reportSha256, /^[0-9a-f]{64}$/);
 });
 
 test("accepts only a run-bound strict normal-App trusted-keyboard report", () => {
