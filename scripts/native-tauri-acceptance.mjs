@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { createReadStream, existsSync, realpathSync, statSync } from "node:fs";
 import {
   chmod,
   copyFile,
@@ -481,7 +481,13 @@ export function validateNativeAcceptanceReport(report, expected) {
   requireArg(report.activeLaunch.commandArgs, "--host", "127.0.0.1");
   requireArg(report.activeLaunch.commandArgs, "--port", String(activePort));
   if (typeof report.modelId !== "string" || !report.modelId) throw new Error("model ID is missing");
-  if (typeof report.chat?.content !== "string" || !report.chat.content.trim()) {
+  const chatContent = typeof report.chat?.content === "string"
+    ? report.chat.content.trim()
+    : "";
+  const reasoningContent = typeof report.chat?.reasoningContent === "string"
+    ? report.chat.reasoningContent.trim()
+    : "";
+  if (!chatContent && !reasoningContent) {
     throw new Error("non-stream chat evidence is missing");
   }
   if (report.chat?.finishReason !== null && typeof report.chat?.finishReason !== "string") {
@@ -959,7 +965,9 @@ async function fileStamp(path) {
 }
 
 async function sha256FilePath(path) {
-  return createHash("sha256").update(await readFile(path)).digest("hex");
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
 }
 
 async function settingsFileEvidence(path) {

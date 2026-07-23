@@ -17,7 +17,10 @@ import {
 const serverPaths = process.argv.slice(2).length > 0
   ? process.argv.slice(2)
   : (process.env.LLAMA_SERVER_PATHS ?? "").split(/[:;]/);
-const requestedBinaries = serverPaths.map((value) => value.trim()).filter(Boolean).map(resolve);
+const requestedBinaries = serverPaths
+  .map((value) => value.trim())
+  .filter(Boolean)
+  .map((value) => resolve(value));
 const modelPath = process.env.LLAMA_MODEL_PATH?.trim();
 const outputPath = resolve(
   process.env.LLAMA_MATRIX_REPORT ?? "artifacts/real-smoke-matrix.json",

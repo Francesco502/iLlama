@@ -851,7 +851,11 @@ function validateLifecycle({
     throw new Error(`${label} CommandSpec model/host/port arguments are incomplete`);
   }
   if (typeof modelId !== "string" || !modelId) throw new Error(`${label} modelId is missing`);
-  if (typeof chat?.content !== "string" || !chat.content.trim()) {
+  const chatContent = typeof chat?.content === "string" ? chat.content.trim() : "";
+  const reasoningContent = typeof chat?.reasoningContent === "string"
+    ? chat.reasoningContent.trim()
+    : "";
+  if (!chatContent && !reasoningContent) {
     throw new Error(`${label} chat evidence is missing`);
   }
   if (

@@ -12,6 +12,8 @@ const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_READER_DRAIN_TIMEOUT: Duration = Duration::from_millis(200);
 const MAX_PROBE_OUTPUT_BYTES: u64 = 1024 * 1024;
 const REQUIRED_FLAGS: [&str; 3] = ["--model", "--host", "--port"];
+#[cfg(target_os = "macos")]
+const PROBE_DISABLED_BACKEND_PATH: &str = "/__illama_probe_no_dynamic_backend__";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -154,6 +156,7 @@ fn run_probe(binary_path: &str, args: &[&str], timeout: Duration) -> Result<Prob
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    configure_probe_environment(&mut command);
     configure_probe_process(&mut command);
     let mut child = command
         .spawn()
@@ -189,6 +192,18 @@ fn run_probe(binary_path: &str, args: &[&str], timeout: Duration) -> Result<Prob
     })
 }
 
+#[cfg(target_os = "macos")]
+fn configure_probe_environment(command: &mut Command) {
+    // Recent Metal-enabled llama.cpp builds initialize and sometimes compile
+    // GPU backends before printing --help/--version. Capability probing does
+    // not need a backend, and that initialization can exceed the strict five
+    // second probe contract on a cold machine.
+    command.env("GGML_BACKEND_PATH", PROBE_DISABLED_BACKEND_PATH);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn configure_probe_environment(_command: &mut Command) {}
+
 fn spawn_reader(stream: Option<impl Read + Send + 'static>) -> mpsc::Receiver<String> {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
@@ -214,7 +229,7 @@ fn read_stream(stream: Option<impl Read>) -> String {
     output
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn configure_probe_process(command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
@@ -227,6 +242,21 @@ fn configure_probe_process(command: &mut Command) {
             }
         });
     }
+}
+
+#[cfg(target_os = "macos")]
+fn configure_probe_process(_command: &mut Command) {
+    // Keep the default posix_spawn path. Configuring a child process group here
+    // makes Command fall back to fork in a multithreaded WebView process; a
+    // Metal-enabled llama-server can then deadlock while initializing its
+    // compiler service, even for --help or --version.
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn configure_probe_process(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    command.process_group(0);
 }
 
 #[cfg(windows)]
@@ -246,7 +276,19 @@ fn terminate_probe_tree(child: &mut Child) {
         return;
     }
 
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        // The default posix_spawn path is required for Metal-enabled binaries.
+        // Kill direct descendants before the probe itself so helpers cannot
+        // retain inherited output pipes after a timeout.
+        for descendant in macos_descendant_pids(child.id()).into_iter().rev() {
+            unsafe {
+                let _ = libc::kill(descendant, libc::SIGKILL);
+            }
+        }
+    }
+
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
     unsafe {
         let _ = libc::kill(-(child.id() as i32), libc::SIGKILL);
     }
@@ -271,6 +313,32 @@ fn terminate_probe_tree(child: &mut Child) {
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[cfg(target_os = "macos")]
+fn macos_descendant_pids(root_pid: u32) -> Vec<i32> {
+    let mut descendants = Vec::new();
+    let mut pending = vec![root_pid];
+    while let Some(parent) = pending.pop() {
+        let Ok(output) = Command::new("pgrep")
+            .args(["-P", &parent.to_string()])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            continue;
+        };
+        for child in String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|value| value.trim().parse::<i32>().ok())
+        {
+            descendants.push(child);
+            if let Ok(child) = u32::try_from(child) {
+                pending.push(child);
+            }
+        }
+    }
+    descendants
 }
 
 #[cfg(target_os = "linux")]
@@ -340,7 +408,7 @@ fn first_non_empty_line(output: &str) -> Option<String> {
     output
         .lines()
         .map(str::trim)
-        .find(|line| !line.is_empty())
+        .find(|line| !line.is_empty() && !line.contains("/__illama_probe_no_dynamic_backend__"))
         .map(str::to_string)
 }
 

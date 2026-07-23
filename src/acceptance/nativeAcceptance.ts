@@ -51,7 +51,7 @@ export interface NativeAcceptanceReport {
   commandSpec: CommandSpec | null;
   activeLaunch: ActiveLaunchSnapshot | null;
   modelId: string | null;
-  chat: { content: string; finishReason: string | null } | null;
+  chat: { content: string; reasoningContent: string; finishReason: string | null } | null;
   cancellation: {
     abortControllerAborted: boolean;
     abortErrorObserved: boolean;
@@ -229,8 +229,14 @@ export async function runNativeAcceptance(
       acceptanceSampling(),
       config.chatTimeoutMs,
     );
-    if (!chat.content.trim()) throw new Error("non-stream chat returned empty content");
-    report.chat = { content: chat.content, finishReason: chat.finishReason ?? null };
+    if (!chat.content.trim() && !chat.reasoningContent.trim()) {
+      throw new Error("non-stream chat returned no content or reasoning output");
+    }
+    report.chat = {
+      content: chat.content,
+      reasoningContent: chat.reasoningContent,
+      finishReason: chat.finishReason ?? null,
+    };
     addStep(report, "non-stream-chat", "webview-http");
 
     report.cancellation = await proveAbortControllerCancellation(
@@ -345,7 +351,12 @@ function validateScan(scan: ModelScanResult, configuredPath: string): NonNullabl
 
 function validateCapabilities(capabilities: ServerCapabilities, binaryPath: string): void {
   if (capabilities.binaryPath !== binaryPath || capabilities.status === "invalid") {
-    throw new Error("llama-server capability probe did not accept the configured executable");
+    const details = capabilities.warnings.length > 0
+      ? capabilities.warnings.join(" ")
+      : `probe status: ${capabilities.status}`;
+    throw new Error(
+      `llama-server capability probe did not accept the configured executable: ${details}`,
+    );
   }
   for (const flag of ["--model", "--host", "--port"]) {
     if (!capabilities.supportedFlags.includes(flag)) {
@@ -499,7 +510,9 @@ function buildLaunchConfig(config: NativeAcceptanceConfig, port: number): Launch
       ctxSize: 2048,
       threads: "auto",
       threadsBatch: "auto",
-      gpuLayers: 0,
+      // Exercise the same backend auto-selection used by the normal app. The
+      // selected llama.cpp build owns Metal/CUDA/Vulkan backend discovery.
+      gpuLayers: "auto",
       batchSize: 256,
       ubatchSize: 64,
       flashAttention: "auto",

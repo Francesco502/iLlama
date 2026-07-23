@@ -32,6 +32,16 @@ test("accepts a complete native Tauri report", () => {
   assert.doesNotThrow(() => validateNativeAcceptanceReport(validReport(), expected()));
 });
 
+test("accepts a reasoning-only native chat response", () => {
+  const report = validReport();
+  report.chat = {
+    content: "",
+    reasoningContent: "The model produced reasoning output.",
+    finishReason: "length",
+  };
+  assert.doesNotThrow(() => validateNativeAcceptanceReport(report, expected()));
+});
+
 test("accepts only a run-bound strict normal-App trusted-keyboard report", () => {
   assert.doesNotThrow(() => validateNormalAppKeyboardReport(validNormalReport(), {
     ...expected(),
