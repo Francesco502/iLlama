@@ -75,7 +75,7 @@ for (let index = 0; index < binaries.length; index += 1) {
       modelPath: model,
       modelSha256,
       steps: native.steps,
-      artifacts: native.artifacts,
+      artifacts: result.artifacts,
       scan: native.scan,
       commandSpec: native.commandSpec,
       activeSnapshot: {
