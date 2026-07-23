@@ -417,7 +417,8 @@ test("real matrix derives the commit from checkout and records canonical native 
   assert.match(source, /const gitSha = currentGitSha\(\)/);
   assert.match(source, /await realpath\(requestedBinary\)/);
   assert.match(source, /steps:\s*native\.steps/);
-  assert.match(source, /artifacts:\s*native\.artifacts/);
+  assert.match(source, /artifacts:\s*result\.artifacts/);
+  assert.doesNotMatch(source, /artifacts:\s*native\.artifacts/);
 });
 
 test("external-client manifest rejects a failed or detached native service report", async (t) => {
