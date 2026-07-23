@@ -51,7 +51,13 @@ const EXTERNAL_REPORT_FIELDS = new Set([
   "transcriptSha256",
   "completedAt",
 ]);
-const STREAMING_EVIDENCE_FIELDS = new Set(["events", "content", "done", "sequence"]);
+const STREAMING_EVIDENCE_FIELDS = new Set([
+  "events",
+  "content",
+  "reasoningContent",
+  "done",
+  "sequence",
+]);
 const SSE_EVENT_SEQUENCE_FIELDS = new Set(["type", "eventIndex"]);
 const SSE_DONE_SEQUENCE_FIELDS = new Set(["type"]);
 const RC_PROVENANCE_FIELDS = new Set([
@@ -385,10 +391,12 @@ export async function validateExternalClientEvidence(report, expected = {}) {
 
   assertRecord(report.nonStream, "non-stream evidence");
   const nonStreamContent = report.nonStream.response?.choices?.[0]?.message?.content;
+  const nonStreamReasoning = report.nonStream.response?.choices?.[0]?.message?.reasoning_content;
   if (
-    typeof nonStreamContent !== "string" ||
-    !nonStreamContent.trim() ||
-    report.nonStream.content !== nonStreamContent
+    (!(typeof nonStreamContent === "string" && nonStreamContent.trim()) &&
+      !(typeof nonStreamReasoning === "string" && nonStreamReasoning.trim())) ||
+    report.nonStream.content !== (nonStreamContent ?? "") ||
+    (report.nonStream.reasoningContent ?? "") !== (nonStreamReasoning ?? "")
   ) {
     throw new Error("non-stream chat evidence is missing or inconsistent");
   }
@@ -1051,6 +1059,7 @@ function validateStreamingEvidence(streaming) {
   }
 
   let content = "";
+  let reasoningContent = "";
   let contentEventSeen = false;
   for (let index = 0; index < streaming.events.length; index += 1) {
     const entry = streaming.sequence[index];
@@ -1068,6 +1077,11 @@ function validateStreamingEvidence(streaming) {
       content += delta;
       if (delta.length > 0) contentEventSeen = true;
     }
+    const reasoningDelta = streaming.events[index]?.choices?.[0]?.delta?.reasoning_content;
+    if (typeof reasoningDelta === "string") {
+      reasoningContent += reasoningDelta;
+      if (reasoningDelta.length > 0) contentEventSeen = true;
+    }
   }
 
   const terminal = streaming.sequence.at(-1);
@@ -1076,7 +1090,12 @@ function validateStreamingEvidence(streaming) {
   if (terminal.type !== "done") {
     throw new Error("streaming SSE [DONE] must be the unique terminal sequence entry");
   }
-  if (!contentEventSeen || !content || streaming.content !== content) {
+  if (
+    !contentEventSeen ||
+    (!content && !reasoningContent) ||
+    streaming.content !== content ||
+    (streaming.reasoningContent ?? "") !== reasoningContent
+  ) {
     throw new Error("streaming SSE content evidence is missing or inconsistent");
   }
 }

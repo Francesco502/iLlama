@@ -410,7 +410,10 @@ export function validateNativeAcceptanceReport(report, expected) {
   }
   if (report.startedPid === 1) throw new Error("native acceptance reported forbidden PID 1");
 
-  requireOrderedUniqueSteps(report.steps, requiredNativeSteps(expected.fixtureControl));
+  requireOrderedUniqueSteps(
+    report.steps,
+    requiredNativeSteps(expected.fixtureControl, Boolean(expected.externalClient)),
+  );
   if (expected.fixtureControl) {
     if (
       report.healthTransition?.exercised !== true ||
@@ -516,6 +519,14 @@ export function validateNativeAcceptanceReport(report, expected) {
     typeof report.healthTransition?.exercised !== "boolean"
   ) {
     throw new Error("healthTransition evidence is incomplete");
+  }
+  if (expected.externalClient) {
+    if (
+      report.externalClient?.path !== expected.externalClient ||
+      report.externalClient?.status !== "executed"
+    ) throw new Error("native externalClient was not executed through Tauri IPC");
+  } else if (report.externalClient !== undefined) {
+    throw new Error("native report contains an unconfigured externalClient");
   }
   return report;
 }
@@ -836,13 +847,14 @@ function requireAbsoluteExistingFile(value, flag) {
   return realpathSync(path);
 }
 
-function requiredNativeSteps(fixtureControl) {
-  if (!fixtureControl) return REQUIRED_NATIVE_STEPS;
-  return [
+function requiredNativeSteps(fixtureControl, externalClient) {
+  const steps = [
     ...REQUIRED_NATIVE_STEPS.slice(0, 8),
-    ...REQUIRED_FIXTURE_HEALTH_STEPS,
+    ...(fixtureControl ? REQUIRED_FIXTURE_HEALTH_STEPS : []),
+    ...(externalClient ? [["external-client-curl", "tauri-ipc"]] : []),
     ...REQUIRED_NATIVE_STEPS.slice(8),
   ];
+  return steps;
 }
 
 function requireOrderedUniqueSteps(steps, required) {

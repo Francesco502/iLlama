@@ -597,12 +597,23 @@ test("SSE parsing retains data-event order and the terminal DONE frame", () => {
   assert.deepEqual(streaming, {
     events: [event],
     content: "Hello",
+    reasoningContent: "",
     done: true,
     sequence: [
       { type: "event", eventIndex: 0 },
       { type: "done" },
     ],
   });
+});
+
+test("SSE parsing accepts reasoning-only model output before DONE", () => {
+  const parseSse = curlApi("parseSse");
+  const event = { choices: [{ delta: { reasoning_content: "thinking" } }] };
+  const streaming = parseSse(`data: ${JSON.stringify(event)}\n\ndata: [DONE]\n\n`);
+
+  assert.equal(streaming.content, "");
+  assert.equal(streaming.reasoningContent, "thinking");
+  assert.equal(streaming.done, true);
 });
 
 test("SSE parsing rejects DONE before the first content event", () => {
@@ -1182,6 +1193,7 @@ test("workflows publish an unnotarized DMG with exact CI and application evidenc
   assert.doesNotMatch(release, /signed-release|unsigned-artifact|APPLE_|notarytool|stapler|spctl --assess/);
   assert.match(acceptance, /options: \[llama-matrix, external-client\]/);
   assert.match(acceptance, /runs-on:\s*\[self-hosted, macOS, ARM64\]/);
+  assert.match(acceptance, /--surface deep-runner/);
   assert.match(acceptance, /\[\[ "\$\(uname -m\)" == "arm64" \]\]/);
   for (const pattern of [
     /native-tauri-acceptance\.mjs/,

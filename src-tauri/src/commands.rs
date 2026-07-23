@@ -5,7 +5,7 @@ use crate::{
     },
     health::{check_http_health, find_available_port, HealthStatus},
     legacy_chat_export::export_legacy_chat_history,
-    llama_process::{LlamaProcessState, RuntimeSnapshot},
+    llama_process::{LlamaProcessState, RuntimeSnapshot, RuntimeStatus},
     model_scan::{scan_model_directory_with_progress, ModelScanProgress, ModelScanResult},
     parameters::{build_command_args, validate_launch_config, LaunchConfig, ValidationResult},
     server_probe::{
@@ -314,6 +314,27 @@ pub fn native_acceptance_runner_started_command(
     }
     state.emit_marker(NativeAcceptanceMarker::RunnerStarted);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn run_native_acceptance_external_client_command(
+    acceptance: State<'_, NativeAcceptanceState>,
+    process: State<'_, LlamaProcessState>,
+) -> Result<(), String> {
+    let snapshot = process.refresh_snapshot();
+    if snapshot.status != RuntimeStatus::Healthy || snapshot.pid.is_none() {
+        return Err("external client requires a healthy iLlama-managed process".to_string());
+    }
+    let active = snapshot
+        .active_launch
+        .ok_or_else(|| "external client requires the active launch snapshot".to_string())?;
+    if active.model_id.as_deref().is_none_or(str::is_empty) {
+        return Err("external client requires the model ID discovered by iLlama".to_string());
+    }
+    let invocation = acceptance.external_client_invocation(&active.host, active.port)?;
+    tauri::async_runtime::spawn_blocking(move || invocation.run())
+        .await
+        .map_err(|error| format!("external client acceptance task failed: {error}"))?
 }
 
 #[tauri::command]

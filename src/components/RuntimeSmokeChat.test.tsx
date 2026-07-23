@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { RuntimeSnapshot } from "../api/tauri";
 import { defaultSampling } from "../lib/parameterSchema";
 import { resolvedStartupParametersFixture } from "../test/resolvedStartupParameters";
-import { RuntimeSmokeChat } from "./RuntimeSmokeChat";
+import { assistantMessageText, RuntimeSmokeChat } from "./RuntimeSmokeChat";
 
 const healthySnapshot: RuntimeSnapshot = {
   status: "healthy",
@@ -54,6 +54,17 @@ const healthySnapshot: RuntimeSnapshot = {
 };
 
 describe("RuntimeSmokeChat", () => {
+  it("renders reasoning-only llama.cpp responses instead of an empty bubble", () => {
+    expect(assistantMessageText({
+      id: "reasoning-only",
+      role: "assistant",
+      content: "",
+      reasoningContent: "模型推理输出",
+      createdAt: "2026-07-23T00:00:00Z",
+      status: "complete",
+    })).toBe("模型推理输出");
+  });
+
   it("renders as a transient smoke test instead of a conversation workspace", () => {
     render(
       <RuntimeSmokeChat

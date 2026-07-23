@@ -146,7 +146,9 @@ export function RuntimeSmokeChat({
                 </div>
                 <div className="chat-message-content smoke-bubble">
                   {message.role === "assistant" ? (
-                    <MarkdownContent text={message.content || (message.status === "streaming" ? "…" : "")} />
+                    <MarkdownContent
+                      text={assistantMessageText(message)}
+                    />
                   ) : (
                     <UserSmokeMessageContent message={message} />
                   )}
@@ -170,6 +172,10 @@ export function RuntimeSmokeChat({
       />
     </section>
   );
+}
+
+export function assistantMessageText(message: ChatMessage): string {
+  return message.content || message.reasoningContent || (message.status === "streaming" ? "…" : "");
 }
 
 function fileNameFromPath(path: string): string {
