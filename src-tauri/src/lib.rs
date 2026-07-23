@@ -42,6 +42,7 @@ pub fn run() {
             commands::get_tray_enabled_command,
             commands::native_acceptance_config_command,
             commands::native_acceptance_runner_started_command,
+            commands::run_native_acceptance_external_client_command,
             commands::normal_acceptance_progress_command,
             commands::native_acceptance_settings_isolation_command,
             commands::write_native_acceptance_report_command,

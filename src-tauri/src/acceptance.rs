@@ -6,17 +6,81 @@ use std::{
     env, fs,
     fs::OpenOptions,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex,
     },
+    thread,
+    time::{Duration, Instant},
 };
 
 static REPORT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const DEFAULT_STARTUP_TIMEOUT_MS: u64 = 180_000;
 const CHAT_TIMEOUT_MS: u64 = 120_000;
 const CANCELLATION_TIMEOUT_MS: u64 = 120_000;
+const EXTERNAL_CLIENT_TIMEOUT: Duration = Duration::from_secs(300);
+const EXTERNAL_CLIENT_METADATA: [(&str, &str); 6] = [
+    ("ILLAMA_EXTERNAL_CLIENT_REPORT", "--report"),
+    ("ILLAMA_EVIDENCE_HEAD_SHA", "--head-sha"),
+    ("ILLAMA_EVIDENCE_WORKFLOW_PATH", "--workflow-path"),
+    ("ILLAMA_EVIDENCE_RUN_ID", "--run-id"),
+    ("ILLAMA_EVIDENCE_RUN_ATTEMPT", "--run-attempt"),
+    ("ILLAMA_EVIDENCE_REPOSITORY", "--repository"),
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalClientInvocation {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub report_path: PathBuf,
+}
+
+impl ExternalClientInvocation {
+    pub fn run(self) -> Result<(), String> {
+        let mut child = Command::new(&self.program)
+            .args(&self.args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|error| format!("unable to start configured external client: {error}"))?;
+        let deadline = Instant::now() + EXTERNAL_CLIENT_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => break,
+                Ok(Some(status)) => {
+                    return Err(format!("configured external client exited with {status}"));
+                }
+                Ok(None) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "configured external client timed out after {} seconds",
+                        EXTERNAL_CLIENT_TIMEOUT.as_secs()
+                    ));
+                }
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "unable to wait for configured external client: {error}"
+                    ));
+                }
+            }
+        }
+        if !self.report_path.is_file() {
+            return Err(
+                "configured external client did not create its evidence report".to_string(),
+            );
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeAcceptanceMarker {
@@ -197,6 +261,55 @@ impl NativeAcceptanceState {
         self.config.as_ref()
     }
 
+    pub fn external_client_invocation(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Result<ExternalClientInvocation, String> {
+        let config = self
+            .config
+            .as_ref()
+            .filter(|config| config.surface == "deep-runner")
+            .ok_or_else(|| "deep native acceptance mode is disabled".to_string())?;
+        let script = config
+            .external_client
+            .as_ref()
+            .ok_or_else(|| "native acceptance has no configured external client".to_string())?;
+        if host != "127.0.0.1" || port < 1024 {
+            return Err("external client must target the active loopback service".to_string());
+        }
+        let node = discover_node_executable()?;
+        let report = env::var("ILLAMA_EXTERNAL_CLIENT_REPORT")
+            .map_err(|_| "ILLAMA_EXTERNAL_CLIENT_REPORT is required".to_string())?;
+        let report_path = PathBuf::from(validate_path(
+            "ILLAMA_EXTERNAL_CLIENT_REPORT",
+            report.trim(),
+            PathKind::Report,
+        )?);
+        let mut args = vec![
+            script.clone(),
+            "--endpoint".to_string(),
+            format!("{}://{host}:{port}", "http"),
+        ];
+        for (key, flag) in EXTERNAL_CLIENT_METADATA {
+            let value = env::var(key)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| format!("{key} is required"))?;
+            args.push(flag.to_string());
+            args.push(if key == "ILLAMA_EXTERNAL_CLIENT_REPORT" {
+                report_path.to_string_lossy().to_string()
+            } else {
+                value
+            });
+        }
+        Ok(ExternalClientInvocation {
+            program: node,
+            args,
+            report_path,
+        })
+    }
+
     pub fn marker(&self, marker: NativeAcceptanceMarker) -> Option<&'static str> {
         self.config.as_ref().map(|_| marker.text())
     }
@@ -329,6 +442,19 @@ impl NativeAcceptanceState {
             _ => Err("native acceptance exitCode must be 0 or 1".to_string()),
         }
     }
+}
+
+fn discover_node_executable() -> Result<PathBuf, String> {
+    let executable_name = if cfg!(windows) { "node.exe" } else { "node" };
+    let path = env::var_os("PATH").unwrap_or_default();
+    for directory in env::split_paths(&path).filter(|directory| directory.is_absolute()) {
+        let candidate = directory.join(executable_name);
+        if candidate.is_file() {
+            return fs::canonicalize(&candidate)
+                .map_err(|error| format!("unable to resolve node executable: {error}"));
+        }
+    }
+    Err("unable to discover the node executable required by external-client acceptance".to_string())
 }
 
 fn normal_acceptance_settings(config: &NativeAcceptanceConfig) -> AppSettings {
@@ -682,6 +808,9 @@ fn validate_deep_success_report(
             ("health-recovery", "tauri-ipc"),
         ]);
     }
+    if config.external_client.is_some() {
+        expected.push(("external-client-curl", "tauri-ipc"));
+    }
     expected.extend([
         ("non-stream-chat", "webview-http"),
         ("stream-cancellation", "webview-http"),
@@ -722,6 +851,20 @@ fn validate_deep_success_report(
         return Err("activeLaunch.commandArgs does not exactly match commandSpec.args".into());
     }
     validate_common_success_evidence(object, config)?;
+
+    match (&config.external_client, object.get("externalClient")) {
+        (Some(expected), Some(value)) => {
+            let external = required_object(Some(value), "externalClient")?;
+            if external.get("path").and_then(Value::as_str) != Some(expected.as_str())
+                || external.get("status").and_then(Value::as_str) != Some("executed")
+            {
+                return Err("deep externalClient evidence is mismatched".into());
+            }
+        }
+        (None, Some(_)) => return Err("deep report contains an unconfigured externalClient".into()),
+        (Some(_), None) => return Err("deep report is missing externalClient evidence".into()),
+        (None, None) => {}
+    }
 
     let chat = required_object(object.get("chat"), "chat")?;
     let content = chat

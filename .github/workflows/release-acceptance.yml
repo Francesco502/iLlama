@@ -146,7 +146,8 @@ jobs:
             --binary "$LLAMA_PRIMARY_BINARY" \
             --model "$LLAMA_MODEL_PATH" \
             --report "$RUNNER_TEMP/evidence/native-report.json" \
-            --external-client "$GITHUB_WORKSPACE/scripts/external-client-curl.mjs"
+            --external-client "$GITHUB_WORKSPACE/scripts/external-client-curl.mjs" \
+            --surface deep-runner
 
       - name: Validate curl execution and create external-client evidence
         if: inputs.evidence_type == 'external-client'

@@ -93,6 +93,24 @@ describe("runNativeAcceptance", () => {
     });
   });
 
+  it("executes a configured external client while the iLlama process is healthy", async () => {
+    const calls: string[] = [];
+    const dependencies = passingDependencies(calls, () => {});
+
+    const report = await runNativeAcceptance(
+      { ...config(), fixtureControl: false, externalClient: "/fixtures/external-client.mjs" },
+      dependencies,
+    );
+
+    expect(report.status).toBe("success");
+    expect(report.externalClient).toEqual({
+      path: "/fixtures/external-client.mjs",
+      status: "executed",
+    });
+    expect(calls.indexOf("external-client")).toBeGreaterThan(calls.indexOf("snapshot:healthy"));
+    expect(calls.indexOf("external-client")).toBeLessThan(calls.indexOf("chat"));
+  });
+
   it("writes a failure report and stops if a simulated PID 1 is returned", async () => {
     const calls: string[] = [];
     let finished: { report: NativeAcceptanceReport; exitCode: number } | null = null;
@@ -244,6 +262,9 @@ function passingDependencies(
     },
     markRunnerStarted: async () => {
       calls.push("runner-started");
+    },
+    runExternalClient: async () => {
+      calls.push("external-client");
     },
     scanModelDirectory: async () => {
       calls.push("scan");

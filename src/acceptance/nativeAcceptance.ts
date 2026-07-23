@@ -9,6 +9,7 @@ import {
   markNativeAcceptanceRunnerStarted,
   normalizeCommandError,
   probeLlamaServer,
+  runNativeAcceptanceExternalClient,
   runtimeSnapshot,
   scanModelDirectory,
   startLlama,
@@ -75,13 +76,14 @@ export interface NativeAcceptanceReport {
     degradedStatus: RuntimeSnapshot["status"] | null;
     recoveredStatus: RuntimeSnapshot["status"] | null;
   };
-  externalClient?: { path: string; status: "configured" };
+  externalClient?: { path: string; status: "configured" | "executed" };
   error?: string;
 }
 
 export interface NativeAcceptanceDependencies {
   isTauriRuntime: () => boolean;
   markRunnerStarted: typeof markNativeAcceptanceRunnerStarted;
+  runExternalClient: typeof runNativeAcceptanceExternalClient;
   scanModelDirectory: typeof scanModelDirectory;
   probeLlamaServer: typeof probeLlamaServer;
   buildCommandSpec: typeof buildCommandSpec;
@@ -101,6 +103,7 @@ export interface NativeAcceptanceDependencies {
 const defaultDependencies: NativeAcceptanceDependencies = {
   isTauriRuntime,
   markRunnerStarted: markNativeAcceptanceRunnerStarted,
+  runExternalClient: runNativeAcceptanceExternalClient,
   scanModelDirectory,
   probeLlamaServer,
   buildCommandSpec,
@@ -221,6 +224,12 @@ export async function runNativeAcceptance(
       report.healthTransition.exercised = true;
       report.healthTransition.recoveredStatus = recovered.status;
       addStep(report, "health-recovery", "tauri-ipc");
+    }
+
+    if (config.externalClient) {
+      await dependencies.runExternalClient();
+      report.externalClient = { path: config.externalClient, status: "executed" };
+      addStep(report, "external-client-curl", "tauri-ipc");
     }
 
     const chat = await completeChatWithTimeout(

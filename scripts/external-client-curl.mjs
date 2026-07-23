@@ -85,8 +85,9 @@ export async function runExternalClientCurl(options = {}) {
     "/v1/chat/completions non-stream",
   );
   const nonStreamContent = nonStreamResponse?.choices?.[0]?.message?.content;
-  if (!nonEmptyString(nonStreamContent)) {
-    throw new Error("curl non-stream chat response did not contain assistant content");
+  const nonStreamReasoningContent = nonStreamResponse?.choices?.[0]?.message?.reasoning_content;
+  if (!nonEmptyString(nonStreamContent) && !nonEmptyString(nonStreamReasoningContent)) {
+    throw new Error("curl non-stream chat response did not contain assistant content or reasoning_content");
   }
 
   const streamingResult = await runCurlProcess(curlPath, requestArguments({
@@ -98,8 +99,12 @@ export async function runExternalClientCurl(options = {}) {
     noBuffer: true,
   }), { timeoutMs: STREAM_TIMEOUT_MS });
   const streaming = parseSse(streamingResult.stdout);
-  if (!streaming.done || streaming.events.length === 0 || !streaming.content) {
-    throw new Error("curl SSE response did not contain content followed by [DONE]");
+  if (
+    !streaming.done ||
+    streaming.events.length === 0 ||
+    (!streaming.content && !streaming.reasoningContent)
+  ) {
+    throw new Error("curl SSE response did not contain content or reasoning_content followed by [DONE]");
   }
 
   const cancellation = await runCancellation(curlPath, requestArguments({
@@ -132,7 +137,11 @@ export async function runExternalClientCurl(options = {}) {
     curl,
     models: { response: modelsResponse, modelIds },
     detectedModelId,
-    nonStream: { response: nonStreamResponse, content: nonStreamContent },
+    nonStream: {
+      response: nonStreamResponse,
+      content: nonStreamContent ?? "",
+      reasoningContent: nonStreamReasoningContent ?? "",
+    },
     streaming,
     cancellation,
     transcript,
@@ -356,6 +365,7 @@ export function parseSse(raw) {
   let done = false;
   let contentEventSeen = false;
   let content = "";
+  let reasoningContent = "";
   for (const line of raw.split(/\r?\n/)) {
     if (!line.startsWith("data:")) continue;
     const data = line.slice(5).trimStart();
@@ -385,8 +395,13 @@ export function parseSse(raw) {
       content += delta;
       if (delta.length > 0) contentEventSeen = true;
     }
+    const reasoningDelta = event?.choices?.[0]?.delta?.reasoning_content;
+    if (typeof reasoningDelta === "string") {
+      reasoningContent += reasoningDelta;
+      if (reasoningDelta.length > 0) contentEventSeen = true;
+    }
   }
-  return { events, content, done, sequence };
+  return { events, content, reasoningContent, done, sequence };
 }
 
 function hasSseData(raw) {
