@@ -684,6 +684,13 @@ export async function verifyProjectPolicy({
 
   const csp = tauriConfig.app?.security?.csp;
   for (const cspFailure of validateTauriCsp(csp)) fail(cspFailure);
+  if (
+    !Array.isArray(tauriConfig.app?.windows) ||
+    tauriConfig.app.windows.length === 0 ||
+    tauriConfig.app.windows.some((window) => window.backgroundThrottling !== "disabled")
+  ) {
+    fail("Every Tauri window must disable background throttling so runtime control and cancellation remain active off-focus");
+  }
 
   let resourceFiles = [];
   try {

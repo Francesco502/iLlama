@@ -311,9 +311,7 @@ async function waitForExternalClient(
     if (result.status === "failure") {
       throw new Error(result.error ?? "external client acceptance failed");
     }
-    // WebKit can suspend background-window timers while the native curl process is
-    // running. The IPC round trip itself yields to the event loop, so keep polling
-    // through IPC instead of relying on a timer that may never resume in CI.
+    await dependencies.wait(250);
   }
   throw new Error("external client acceptance status timed out");
 }

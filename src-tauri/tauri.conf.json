@@ -17,6 +17,7 @@
         "height": 760,
         "minWidth": 1000,
         "minHeight": 680,
+        "backgroundThrottling": "disabled",
         "resizable": true
       }
     ],

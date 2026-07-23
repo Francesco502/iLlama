@@ -119,6 +119,7 @@ pub struct NativeAcceptanceState {
     user_settings_snapshot: Mutex<Option<CapturedSettingsSnapshot>>,
     external_client_execution: Arc<AtomicU8>,
     external_client_error: Arc<Mutex<Option<String>>>,
+    external_client_report_path: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl Default for NativeAcceptanceState {
@@ -129,6 +130,7 @@ impl Default for NativeAcceptanceState {
             user_settings_snapshot: Mutex::new(None),
             external_client_execution: Arc::new(AtomicU8::new(0)),
             external_client_error: Arc::new(Mutex::new(None)),
+            external_client_report_path: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -251,6 +253,7 @@ impl NativeAcceptanceState {
             user_settings_snapshot: Mutex::new(None),
             external_client_execution: Arc::new(AtomicU8::new(0)),
             external_client_error: Arc::new(Mutex::new(None)),
+            external_client_report_path: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -318,6 +321,11 @@ impl NativeAcceptanceState {
             .external_client_error
             .lock()
             .map_err(|_| "external client error lock is poisoned".to_string())? = None;
+        *self
+            .external_client_report_path
+            .lock()
+            .map_err(|_| "external client report lock is poisoned".to_string())? =
+            Some(invocation.report_path.clone());
 
         let execution = Arc::clone(&self.external_client_execution);
         let error_state = Arc::clone(&self.external_client_error);
@@ -338,6 +346,26 @@ impl NativeAcceptanceState {
     }
 
     pub fn external_client_status(&self) -> Result<ExternalClientExecutionStatus, String> {
+        if self.external_client_execution.load(Ordering::Acquire) == 1 {
+            let report_path = self
+                .external_client_report_path
+                .lock()
+                .map_err(|_| "external client report lock is poisoned".to_string())?
+                .clone();
+            if let Some(report_path) = report_path.filter(|path| path.is_file()) {
+                let report: Value =
+                    serde_json::from_slice(&fs::read(&report_path).map_err(|error| {
+                        format!("unable to read external client report: {error}")
+                    })?)
+                    .map_err(|error| format!("external client report is invalid JSON: {error}"))?;
+                if report.get("status").and_then(Value::as_str) == Some("success") {
+                    // The client publishes its report with an atomic rename. Treat that
+                    // durable success record as authoritative even if macOS delays the
+                    // child-exit notification while the app is in the background.
+                    self.external_client_execution.store(2, Ordering::Release);
+                }
+            }
+        }
         Ok(
             match self.external_client_execution.load(Ordering::Acquire) {
                 0 => ExternalClientExecutionStatus {
@@ -1485,4 +1513,39 @@ fn atomic_write_json(path: &Path, report: &Value) -> Result<(), String> {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+#[cfg(test)]
+mod external_client_status_tests {
+    use super::*;
+
+    #[test]
+    fn durable_success_report_completes_a_delayed_child_exit_notification() {
+        let directory = tempfile::tempdir().unwrap();
+        let report_path = directory.path().join("external-client-report.json");
+        fs::write(&report_path, br#"{"status":"success"}"#).unwrap();
+        let state = NativeAcceptanceState::default();
+        state.external_client_execution.store(1, Ordering::Release);
+        *state.external_client_report_path.lock().unwrap() = Some(report_path);
+
+        let status = state.external_client_status().unwrap();
+
+        assert_eq!(status.status, "success");
+        assert_eq!(state.external_client_execution.load(Ordering::Acquire), 2);
+    }
+
+    #[test]
+    fn non_success_report_does_not_forge_external_client_completion() {
+        let directory = tempfile::tempdir().unwrap();
+        let report_path = directory.path().join("external-client-report.json");
+        fs::write(&report_path, br#"{"status":"failure"}"#).unwrap();
+        let state = NativeAcceptanceState::default();
+        state.external_client_execution.store(1, Ordering::Release);
+        *state.external_client_report_path.lock().unwrap() = Some(report_path);
+
+        let status = state.external_client_status().unwrap();
+
+        assert_eq!(status.status, "running");
+        assert_eq!(state.external_client_execution.load(Ordering::Acquire), 1);
+    }
 }
