@@ -9,6 +9,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   writeFile,
@@ -284,7 +285,9 @@ export async function runNativeTauriAcceptance(options = {}) {
       output.stdout = appendBounded(output.stdout, chunk.toString());
     });
     child.stderr?.on("data", (chunk) => {
-      output.stderr = appendBounded(output.stderr, chunk.toString());
+      const text = chunk.toString();
+      output.stderr = appendBounded(output.stderr, text);
+      if (text.includes("[native-acceptance]")) process.stderr.write(text);
     });
     if (launchServicesApp) {
       launchServicesApp = await identifyNewLaunchServicesApp({
@@ -365,20 +368,31 @@ export async function runNativeTauriAcceptance(options = {}) {
       });
     }
 
+    const artifacts = {
+      appExecutable,
+      appExecutableSha256: await sha256FilePath(appExecutable),
+      binaryPath,
+      binarySha256: await sha256FilePath(binaryPath),
+      modelPath,
+      modelSha256: await sha256FilePath(modelPath),
+    };
+    if (options.externalClient) {
+      const externalReportPath = resolveAbsoluteInput(
+        process.env.ILLAMA_EXTERNAL_CLIENT_REPORT,
+        "ILLAMA_EXTERNAL_CLIENT_REPORT",
+      );
+      const externalReport = JSON.parse(await readFile(externalReportPath, "utf8"));
+      embedExternalClientEvidence(report, externalReport, artifacts);
+      await atomicWriteJson(reportPath, report);
+    }
+
     return {
       appPath,
       reportPath,
       report,
       stdout: output.stdout,
       stderr: output.stderr,
-      artifacts: {
-        appExecutable,
-        appExecutableSha256: await sha256FilePath(appExecutable),
-        binaryPath,
-        binarySha256: await sha256FilePath(binaryPath),
-        modelPath,
-        modelSha256: await sha256FilePath(modelPath),
-      },
+      artifacts,
     };
   } finally {
     await cleanupAcceptanceResources({
@@ -388,6 +402,45 @@ export async function runNativeTauriAcceptance(options = {}) {
       child,
       childTree,
     });
+  }
+}
+
+export function embedExternalClientEvidence(nativeReport, externalReport, artifacts) {
+  if (nativeReport.externalClient?.status !== "executed") {
+    throw new Error("native report did not execute its configured external client");
+  }
+  if (externalReport?.status !== "success") {
+    throw new Error("external client report status is not success");
+  }
+  const endpoint = new URL(externalReport.endpoint);
+  if (
+    endpoint.hostname !== "127.0.0.1" ||
+    Number(endpoint.port) !== nativeReport.activeLaunch?.port
+  ) {
+    throw new Error("external client report endpoint does not match the iLlama active launch");
+  }
+  if (externalReport.detectedModelId !== nativeReport.modelId) {
+    throw new Error("external client report model ID does not match the iLlama snapshot");
+  }
+  nativeReport.artifacts = { ...artifacts };
+  nativeReport.externalClient = {
+    ...nativeReport.externalClient,
+    report: externalReport,
+    reportSha256: createHash("sha256")
+      .update(JSON.stringify(externalReport))
+      .digest("hex"),
+  };
+  return nativeReport;
+}
+
+async function atomicWriteJson(path, value) {
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
   }
 }
 
@@ -851,8 +904,9 @@ function requiredNativeSteps(fixtureControl, externalClient) {
   const steps = [
     ...REQUIRED_NATIVE_STEPS.slice(0, 8),
     ...(fixtureControl ? REQUIRED_FIXTURE_HEALTH_STEPS : []),
+    ...REQUIRED_NATIVE_STEPS.slice(8, 10),
     ...(externalClient ? [["external-client-curl", "tauri-ipc"]] : []),
-    ...REQUIRED_NATIVE_STEPS.slice(8),
+    ...REQUIRED_NATIVE_STEPS.slice(10),
   ];
   return steps;
 }

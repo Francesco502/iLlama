@@ -1,7 +1,7 @@
 use crate::{
     acceptance::{
-        NativeAcceptanceConfig, NativeAcceptanceMarker, NativeAcceptanceState,
-        SettingsIsolationEvidence,
+        ExternalClientExecutionStatus, NativeAcceptanceConfig, NativeAcceptanceMarker,
+        NativeAcceptanceState, SettingsIsolationEvidence,
     },
     health::{check_http_health, find_available_port, HealthStatus},
     legacy_chat_export::export_legacy_chat_history,
@@ -317,7 +317,7 @@ pub fn native_acceptance_runner_started_command(
 }
 
 #[tauri::command]
-pub async fn run_native_acceptance_external_client_command(
+pub fn run_native_acceptance_external_client_command(
     acceptance: State<'_, NativeAcceptanceState>,
     process: State<'_, LlamaProcessState>,
 ) -> Result<(), String> {
@@ -332,9 +332,26 @@ pub async fn run_native_acceptance_external_client_command(
         return Err("external client requires the model ID discovered by iLlama".to_string());
     }
     let invocation = acceptance.external_client_invocation(&active.host, active.port)?;
-    tauri::async_runtime::spawn_blocking(move || invocation.run())
-        .await
-        .map_err(|error| format!("external client acceptance task failed: {error}"))?
+    acceptance.start_external_client(invocation)
+}
+
+#[tauri::command]
+pub async fn native_acceptance_external_client_status_command(
+    acceptance: State<'_, NativeAcceptanceState>,
+) -> Result<ExternalClientExecutionStatus, String> {
+    let mut result = acceptance.external_client_status()?;
+    if result.status == "running" {
+        // Acceptance runs inside a background WebView whose JavaScript timers can
+        // be suspended by WebKit. Pace polling in the native runtime so completion
+        // never depends on a foreground-window timer and IPC cannot flood the queue.
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        result = acceptance.external_client_status()?;
+    }
+    eprintln!(
+        "[native-acceptance] external-client-status:{}",
+        result.status
+    );
+    Ok(result)
 }
 
 #[tauri::command]

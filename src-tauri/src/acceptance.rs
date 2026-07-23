@@ -7,13 +7,12 @@ use std::{
     fs::OpenOptions,
     io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex,
+        atomic::{AtomicU64, AtomicU8, Ordering},
+        Arc, Mutex,
     },
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 static REPORT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -37,41 +36,33 @@ pub struct ExternalClientInvocation {
     pub report_path: PathBuf,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalClientExecutionStatus {
+    pub status: String,
+    pub error: Option<String>,
+}
+
 impl ExternalClientInvocation {
-    pub fn run(self) -> Result<(), String> {
-        let mut child = Command::new(&self.program)
+    pub async fn run(self) -> Result<(), String> {
+        let mut command = tokio::process::Command::new(&self.program);
+        command
             .args(&self.args)
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|error| format!("unable to start configured external client: {error}"))?;
-        let deadline = Instant::now() + EXTERNAL_CLIENT_TIMEOUT;
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) if status.success() => break,
-                Ok(Some(status)) => {
-                    return Err(format!("configured external client exited with {status}"));
-                }
-                Ok(None) if Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(100));
-                }
-                Ok(None) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!(
-                        "configured external client timed out after {} seconds",
-                        EXTERNAL_CLIENT_TIMEOUT.as_secs()
-                    ));
-                }
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!(
-                        "unable to wait for configured external client: {error}"
-                    ));
-                }
-            }
+            .kill_on_drop(true);
+        let status = tokio::time::timeout(EXTERNAL_CLIENT_TIMEOUT, command.status())
+            .await
+            .map_err(|_| {
+                format!(
+                    "configured external client timed out after {} seconds",
+                    EXTERNAL_CLIENT_TIMEOUT.as_secs()
+                )
+            })?
+            .map_err(|error| format!("unable to run configured external client: {error}"))?;
+        if !status.success() {
+            return Err(format!("configured external client exited with {status}"));
         }
         if !self.report_path.is_file() {
             return Err(
@@ -126,6 +117,8 @@ pub struct NativeAcceptanceState {
     config: Option<NativeAcceptanceConfig>,
     normal_settings: Mutex<Option<AppSettings>>,
     user_settings_snapshot: Mutex<Option<CapturedSettingsSnapshot>>,
+    external_client_execution: Arc<AtomicU8>,
+    external_client_error: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for NativeAcceptanceState {
@@ -134,6 +127,8 @@ impl Default for NativeAcceptanceState {
             config: None,
             normal_settings: Mutex::new(None),
             user_settings_snapshot: Mutex::new(None),
+            external_client_execution: Arc::new(AtomicU8::new(0)),
+            external_client_error: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -254,6 +249,8 @@ impl NativeAcceptanceState {
             config: Some(config),
             normal_settings: Mutex::new(normal_settings),
             user_settings_snapshot: Mutex::new(None),
+            external_client_execution: Arc::new(AtomicU8::new(0)),
+            external_client_error: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -308,6 +305,64 @@ impl NativeAcceptanceState {
             args,
             report_path,
         })
+    }
+
+    pub fn start_external_client(
+        &self,
+        invocation: ExternalClientInvocation,
+    ) -> Result<(), String> {
+        if self.external_client_execution.swap(1, Ordering::AcqRel) == 1 {
+            return Err("external client acceptance is already running".to_string());
+        }
+        *self
+            .external_client_error
+            .lock()
+            .map_err(|_| "external client error lock is poisoned".to_string())? = None;
+
+        let execution = Arc::clone(&self.external_client_execution);
+        let error_state = Arc::clone(&self.external_client_error);
+        tauri::async_runtime::spawn(async move {
+            eprintln!("[native-acceptance] external-client-started");
+            match invocation.run().await {
+                Ok(()) => execution.store(2, Ordering::Release),
+                Err(error) => {
+                    if let Ok(mut current) = error_state.lock() {
+                        *current = Some(error);
+                    }
+                    execution.store(3, Ordering::Release);
+                }
+            }
+            eprintln!("[native-acceptance] external-client-completed");
+        });
+        Ok(())
+    }
+
+    pub fn external_client_status(&self) -> Result<ExternalClientExecutionStatus, String> {
+        Ok(
+            match self.external_client_execution.load(Ordering::Acquire) {
+                0 => ExternalClientExecutionStatus {
+                    status: "idle".to_string(),
+                    error: None,
+                },
+                1 => ExternalClientExecutionStatus {
+                    status: "running".to_string(),
+                    error: None,
+                },
+                2 => ExternalClientExecutionStatus {
+                    status: "success".to_string(),
+                    error: None,
+                },
+                3 => ExternalClientExecutionStatus {
+                    status: "failure".to_string(),
+                    error: self
+                        .external_client_error
+                        .lock()
+                        .map_err(|_| "external client error lock is poisoned".to_string())?
+                        .clone(),
+                },
+                _ => return Err("external client execution state is invalid".to_string()),
+            },
+        )
     }
 
     pub fn marker(&self, marker: NativeAcceptanceMarker) -> Option<&'static str> {
@@ -808,15 +863,14 @@ fn validate_deep_success_report(
             ("health-recovery", "tauri-ipc"),
         ]);
     }
-    if config.external_client.is_some() {
-        expected.push(("external-client-curl", "tauri-ipc"));
-    }
     expected.extend([
         ("non-stream-chat", "webview-http"),
         ("stream-cancellation", "webview-http"),
-        ("stop-llama", "tauri-ipc"),
-        ("port-closed", "tauri-ipc"),
     ]);
+    if config.external_client.is_some() {
+        expected.push(("external-client-curl", "tauri-ipc"));
+    }
+    expected.extend([("stop-llama", "tauri-ipc"), ("port-closed", "tauri-ipc")]);
     validate_exact_success_steps(steps, &expected)?;
 
     validate_scan(object.get("scan"), config)?;

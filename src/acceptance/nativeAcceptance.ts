@@ -7,9 +7,10 @@ import {
   finishNativeAcceptance,
   isTauriRuntime,
   markNativeAcceptanceRunnerStarted,
+  nativeAcceptanceExternalClientStatus,
   normalizeCommandError,
   probeLlamaServer,
-  runNativeAcceptanceExternalClient,
+  startNativeAcceptanceExternalClient,
   runtimeSnapshot,
   scanModelDirectory,
   startLlama,
@@ -83,7 +84,8 @@ export interface NativeAcceptanceReport {
 export interface NativeAcceptanceDependencies {
   isTauriRuntime: () => boolean;
   markRunnerStarted: typeof markNativeAcceptanceRunnerStarted;
-  runExternalClient: typeof runNativeAcceptanceExternalClient;
+  startExternalClient: typeof startNativeAcceptanceExternalClient;
+  externalClientStatus: typeof nativeAcceptanceExternalClientStatus;
   scanModelDirectory: typeof scanModelDirectory;
   probeLlamaServer: typeof probeLlamaServer;
   buildCommandSpec: typeof buildCommandSpec;
@@ -103,7 +105,8 @@ export interface NativeAcceptanceDependencies {
 const defaultDependencies: NativeAcceptanceDependencies = {
   isTauriRuntime,
   markRunnerStarted: markNativeAcceptanceRunnerStarted,
-  runExternalClient: runNativeAcceptanceExternalClient,
+  startExternalClient: startNativeAcceptanceExternalClient,
+  externalClientStatus: nativeAcceptanceExternalClientStatus,
   scanModelDirectory,
   probeLlamaServer,
   buildCommandSpec,
@@ -226,11 +229,7 @@ export async function runNativeAcceptance(
       addStep(report, "health-recovery", "tauri-ipc");
     }
 
-    if (config.externalClient) {
-      await dependencies.runExternalClient();
-      report.externalClient = { path: config.externalClient, status: "executed" };
-      addStep(report, "external-client-curl", "tauri-ipc");
-    }
+    if (config.externalClient) await dependencies.startExternalClient();
 
     const chat = await completeChatWithTimeout(
       dependencies,
@@ -255,6 +254,12 @@ export async function runNativeAcceptance(
       config.cancellationTimeoutMs,
     );
     addStep(report, "stream-cancellation", "webview-http");
+
+    if (config.externalClient) {
+      await waitForExternalClient(dependencies, config.cancellationTimeoutMs);
+      report.externalClient = { path: config.externalClient, status: "executed" };
+      addStep(report, "external-client-curl", "tauri-ipc");
+    }
 
     const stopped = await dependencies.stopLlama();
     validateStoppedSnapshot(stopped);
@@ -293,6 +298,24 @@ export async function runNativeAcceptance(
   const exitCode = report.status === "success" ? 0 : 1;
   await dependencies.finish(report, exitCode);
   return report;
+}
+
+async function waitForExternalClient(
+  dependencies: NativeAcceptanceDependencies,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = dependencies.now() + timeoutMs;
+  while (dependencies.now() < deadline) {
+    const result = await dependencies.externalClientStatus();
+    if (result.status === "success") return;
+    if (result.status === "failure") {
+      throw new Error(result.error ?? "external client acceptance failed");
+    }
+    // WebKit can suspend background-window timers while the native curl process is
+    // running. The IPC round trip itself yields to the event loop, so keep polling
+    // through IPC instead of relying on a timer that may never resume in CI.
+  }
+  throw new Error("external client acceptance status timed out");
 }
 
 function emptyReport(config: NativeAcceptanceConfig): NativeAcceptanceReport {
