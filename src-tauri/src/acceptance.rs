@@ -724,7 +724,17 @@ fn validate_deep_success_report(
     validate_common_success_evidence(object, config)?;
 
     let chat = required_object(object.get("chat"), "chat")?;
-    nonempty_string(chat.get("content"), "chat.content")?;
+    let content = chat
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let reasoning_content = chat
+        .get("reasoningContent")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if content.trim().is_empty() && reasoning_content.trim().is_empty() {
+        return Err("chat must contain content or reasoningContent".into());
+    }
     if chat
         .get("finishReason")
         .is_none_or(|value| !(value.is_null() || value.is_string()))

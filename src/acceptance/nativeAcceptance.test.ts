@@ -72,6 +72,27 @@ describe("runNativeAcceptance", () => {
     expect(finished).toEqual({ report, exitCode: 0 });
   });
 
+  it("accepts reasoning-only output from a native chat model", async () => {
+    const calls: string[] = [];
+    const dependencies = passingDependencies(calls, () => {});
+    dependencies.completeChatCompletion = vi.fn(async () => {
+      calls.push("chat");
+      return {
+        content: "",
+        reasoningContent: "The model produced a reasoning response.",
+        finishReason: "stop",
+      };
+    });
+
+    const report = await runNativeAcceptance(config(), dependencies);
+
+    expect(report.status).toBe("success");
+    expect(report.chat).toMatchObject({
+      content: "",
+      reasoningContent: "The model produced a reasoning response.",
+    });
+  });
+
   it("writes a failure report and stops if a simulated PID 1 is returned", async () => {
     const calls: string[] = [];
     let finished: { report: NativeAcceptanceReport; exitCode: number } | null = null;

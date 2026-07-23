@@ -412,6 +412,8 @@ test("matrix evidence rejects incomplete native lifecycles, path swaps, and unbo
 test("real matrix derives the commit from checkout and records canonical native proof", () => {
   const source = readText("scripts/real-smoke-matrix.mjs");
   assert.doesNotMatch(source, /process\.env\.GITHUB_SHA/);
+  assert.doesNotMatch(source, /\.map\(resolve\)/);
+  assert.match(source, /\.map\(\(value\) => resolve\(value\)\)/);
   assert.match(source, /const gitSha = currentGitSha\(\)/);
   assert.match(source, /await realpath\(requestedBinary\)/);
   assert.match(source, /steps:\s*native\.steps/);

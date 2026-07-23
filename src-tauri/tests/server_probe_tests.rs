@@ -51,6 +51,30 @@ echo "Usage: llama-server --model FILE --host HOST --port PORT --ctx-size N --me
 
 #[cfg(unix)]
 #[test]
+fn probes_an_opt_in_real_server_without_exceeding_the_contract_timeout() {
+    let Ok(binary) = std::env::var("ILLAMA_TEST_REAL_SERVER") else {
+        return;
+    };
+
+    let capabilities = probe_llama_server_with_timeout(&binary, Duration::from_secs(5));
+
+    assert_ne!(
+        capabilities.status,
+        ProbeStatus::Invalid,
+        "probe warnings: {:?}",
+        capabilities.warnings
+    );
+    for flag in ["--model", "--host", "--port"] {
+        assert!(
+            capabilities.supported_flags.iter().any(|item| item == flag),
+            "missing {flag}; warnings: {:?}",
+            capabilities.warnings
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn marks_a_hanging_binary_invalid_after_the_probe_timeout() {
     let dir = tempfile::tempdir().unwrap();
     let binary = write_shell_script(dir.path().join("hanging-server"), "sleep 1");
