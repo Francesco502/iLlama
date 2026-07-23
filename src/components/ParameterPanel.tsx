@@ -120,7 +120,7 @@ export function ParameterPanel({
           label="GPU 层数"
           value={String(parameters.gpuLayers)}
           onChange={(v) => update("gpuLayers", parseGpuLayers(v))}
-          tooltip="卸载到 GPU 显存中的模型层数。设置为 'all' 将尽量全部卸载，'auto' 为自动。"
+          tooltip="交给 llama.cpp 卸载到可用加速后端的模型层数。'auto' 由 llama.cpp 自动决定，iLlama 不选择 Metal、CUDA 或 Vulkan。"
           presets={[
             { label: "自动", value: "auto" },
             { label: "全部", value: "all" },
